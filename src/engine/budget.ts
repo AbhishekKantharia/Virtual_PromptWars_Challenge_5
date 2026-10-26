@@ -256,6 +256,41 @@ export function rebalanceBudget(
 }
 
 /**
+ * Reapply the event-type and priority allocation profile to an existing plan.
+ * Category IDs, actual amounts, expenses, and the contingency reserve are
+ * preserved, so recorded spending never loses its category link. This is only
+ * called from an explicit user action because it replaces manual allocations.
+ */
+export function reallocateBudget(
+  plan: BudgetPlan,
+  totalBudget: number,
+  eventType: EventType,
+  priorities: string[] = []
+): BudgetPlan {
+  const safeBudget = sanitizeMoney(totalBudget);
+  const clampedContingency = clampContingency(plan.contingencyPercent);
+  const contingencyAmount = round2(safeBudget * (clampedContingency / 100));
+  const allocatable = Math.max(0, round2(safeBudget - contingencyAmount));
+  const profile = getAllocationWeights(eventType, priorities);
+
+  const categories = plan.categories.map((category) => {
+    const key = findProfileKey(category.name);
+    return {
+      ...category,
+      plannedAmount: key ? round2(allocatable * profile[key]) : 0,
+    };
+  });
+  applyRoundingResidual(categories, allocatable);
+
+  return {
+    ...plan,
+    categories,
+    contingencyPercent: clampedContingency,
+    contingencyAmount,
+  };
+}
+
+/**
  * Set the contingency reserve and rescale allocations so that planned
  * categories plus the reserve never exceed the total budget.
  */

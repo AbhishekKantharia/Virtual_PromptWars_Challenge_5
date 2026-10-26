@@ -43,7 +43,7 @@ export function computeReplanDiff(previous: EventDetails, next: EventDetails): R
   if (previous.type !== next.type) {
     changedFields.push('type');
     explanations.push(
-      `Event type changed from ${previous.type} to ${next.type}. Timeline tasks were regenerated and budget allocations were scaled, while completed tasks and vendors were kept.`
+      `Event type changed from ${previous.type} to ${next.type}. Timeline tasks were regenerated and budget allocations were scaled proportionally, while completed tasks and vendors were kept. Use Recalculate from priorities in the Budget Planner to apply the new event-type profile.`
     );
   }
   if (previous.theme !== next.theme) {
@@ -52,7 +52,9 @@ export function computeReplanDiff(previous: EventDetails, next: EventDetails): R
   }
   if (previous.priorities.join(',') !== next.priorities.join(',')) {
     changedFields.push('priorities');
-    explanations.push('Planning priorities changed. Budget defaults and ideas were refreshed.');
+    explanations.push(
+      'Planning priorities changed. Ideas were refreshed; existing budget allocations and recorded costs were kept. Use Recalculate from priorities in the Budget Planner to apply the new allocation profile.'
+    );
   }
   if (previous.dietaryRequirements !== next.dietaryRequirements) {
     changedFields.push('dietaryRequirements');
@@ -78,7 +80,11 @@ export function computeReplanDiff(previous: EventDetails, next: EventDetails): R
   }
 
   const affectedCategoryIds: string[] = [];
-  if (changedFields.includes('budget') || changedFields.includes('guestCount')) {
+  if (
+    changedFields.includes('budget') ||
+    changedFields.includes('type') ||
+    changedFields.includes('guestCount')
+  ) {
     affectedCategoryIds.push('budget-categories');
   }
   const affectedTaskIds: string[] = [];

@@ -1,7 +1,7 @@
 import React, { useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { formatCurrency } from '../../utils/currency'
-import { Plus, Edit2, Trash2, AlertTriangle, Info } from 'lucide-react'
+import { Plus, Edit2, Trash2, AlertTriangle, Info, RefreshCw } from 'lucide-react'
 import { BudgetCategory, Expense } from '../../types'
 import { sanitizeText, parseMoney } from '../../engine/validation'
 import { ConfirmDialog } from '../common/ConfirmDialog'
@@ -21,8 +21,9 @@ export function BudgetPlanner() {
     notes: '',
   })
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
-  const [expenseError, setExpenseError] = useState('')
+  const [expenseError, setExpenseError] = useState<{ field: string; message: string } | null>(null)
   const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null)
+  const [confirmReallocate, setConfirmReallocate] = useState(false)
 
   if (!event || !budget) {
     return (
@@ -53,15 +54,21 @@ export function BudgetPlanner() {
     const notes = sanitizeText(expenseForm.notes).slice(0, 200)
 
     if (!expenseForm.categoryId) {
-      setExpenseError('Choose a budget category before saving this expense.')
+      setExpenseError({
+        field: 'categoryId',
+        message: 'Choose a budget category before saving this expense.',
+      })
       return
     }
     if (label.length < 2) {
-      setExpenseError('Enter a description of at least 2 characters.')
+      setExpenseError({
+        field: 'label',
+        message: 'Enter a description of at least 2 characters.',
+      })
       return
     }
     if (amount === null || amount <= 0) {
-      setExpenseError('Enter an amount greater than zero.')
+      setExpenseError({ field: 'amount', message: 'Enter an amount greater than zero.' })
       return
     }
 
@@ -89,7 +96,7 @@ export function BudgetPlanner() {
         },
       })
     }
-    setExpenseError('')
+    setExpenseError(null)
     resetExpenseForm()
   }
 
@@ -97,7 +104,7 @@ export function BudgetPlanner() {
     setExpenseForm({ categoryId: '', label: '', amount: '', isQuoted: false, notes: '' })
     setShowExpenseForm(false)
     setEditingExpense(null)
-    setExpenseError('')
+    setExpenseError(null)
   }
 
   function startEditExpense(expense: Expense) {
@@ -181,8 +188,18 @@ export function BudgetPlanner() {
           <div className="card-header">
             <div>
               <h2 className="card-title">Category Allocations</h2>
-              <p className="card-subtitle">Click edit to adjust planned amounts</p>
+              <p className="card-subtitle">
+                Click edit to adjust planned amounts. Recalculate applies your event type and
+                planning priorities without changing recorded expenses.
+              </p>
             </div>
+            <button
+              type="button"
+              className="btn btn-secondary btn-sm"
+              onClick={() => setConfirmReallocate(true)}
+            >
+              <RefreshCw size={14} aria-hidden="true" /> Recalculate from priorities
+            </button>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
@@ -287,9 +304,14 @@ export function BudgetPlanner() {
             noValidate
           >
             {expenseError && (
-              <div className="alert alert-danger" role="alert" style={{ marginBottom: '1rem' }}>
+              <div
+                id="expense-form-error"
+                className="alert alert-danger"
+                role="alert"
+                style={{ marginBottom: '1rem' }}
+              >
                 <AlertTriangle size={14} aria-hidden="true" />
-                <span>{expenseError}</span>
+                <span>{expenseError.message}</span>
               </div>
             )}
             <div className="form-grid">
@@ -297,10 +319,14 @@ export function BudgetPlanner() {
                 <label className="form-label required" htmlFor="expense-category">Category</label>
                 <select
                   id="expense-category"
-                  className="form-select"
+                  className={`form-select${expenseError?.field === 'categoryId' ? ' error' : ''}`}
                   value={expenseForm.categoryId}
                   onChange={(e) => setExpenseForm((f) => ({ ...f, categoryId: e.target.value }))}
                   required
+                  aria-invalid={expenseError?.field === 'categoryId'}
+                  aria-describedby={
+                    expenseError?.field === 'categoryId' ? 'expense-form-error' : undefined
+                  }
                 >
                   <option value="">Select category…</option>
                   {budget.categories.map((cat) => (
@@ -313,12 +339,16 @@ export function BudgetPlanner() {
                 <input
                   id="expense-label"
                   type="text"
-                  className="form-input"
+                  className={`form-input${expenseError?.field === 'label' ? ' error' : ''}`}
                   value={expenseForm.label}
                   onChange={(e) => setExpenseForm((f) => ({ ...f, label: e.target.value }))}
                   placeholder="e.g. Florist deposit"
                   required
                   maxLength={120}
+                  aria-invalid={expenseError?.field === 'label'}
+                  aria-describedby={
+                    expenseError?.field === 'label' ? 'expense-form-error' : undefined
+                  }
                 />
               </div>
               <div className="form-group">
@@ -326,12 +356,16 @@ export function BudgetPlanner() {
                 <input
                   id="expense-amount"
                   type="number"
-                  className="form-input"
+                  className={`form-input${expenseError?.field === 'amount' ? ' error' : ''}`}
                   value={expenseForm.amount}
                   onChange={(e) => setExpenseForm((f) => ({ ...f, amount: e.target.value }))}
                   min={0}
                   step={0.01}
                   required
+                  aria-invalid={expenseError?.field === 'amount'}
+                  aria-describedby={
+                    expenseError?.field === 'amount' ? 'expense-form-error' : undefined
+                  }
                 />
               </div>
               <div className="form-group">
@@ -421,6 +455,18 @@ export function BudgetPlanner() {
           <span>All cost estimates are illustrative and should be verified with actual vendors. EventWise AI does not verify vendor pricing.</span>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmReallocate}
+        title="Recalculate category allocations?"
+        description="This replaces the current planned category amounts with defaults based on your event type and planning priorities. Recorded expenses, actual spending, category links, and the contingency percentage stay unchanged."
+        confirmLabel="Recalculate allocations"
+        onConfirm={() => {
+          dispatch({ type: 'REALLOCATE_BUDGET' })
+          setConfirmReallocate(false)
+        }}
+        onCancel={() => setConfirmReallocate(false)}
+      />
 
       <ConfirmDialog
         open={deleteTarget !== null}

@@ -1,4 +1,9 @@
-import { BudgetSummary, EventDetails } from '../types'
+import { AppState, BudgetSummary, EventDetails } from '../types'
+import { calculateBudgetSummary, createBudgetPlan } from '../engine/budget'
+import { generateTimeline } from '../engine/timeline'
+import { generateRecommendations } from '../engine/recommendations'
+import { getSampleVendors } from '../engine/vendors'
+import { saveState } from '../data/persistence'
 
 export function makeEvent(overrides: Partial<EventDetails> = {}): EventDetails {
   return {
@@ -38,4 +43,37 @@ export function makeBudgetSummary(overrides: Partial<BudgetSummary> = {}): Budge
     currency: 'USD',
     ...overrides,
   }
+}
+
+export function makeAppState(overrides: Partial<AppState> = {}): AppState {
+  const event = overrides.event ?? makeEvent()
+  const budget =
+    overrides.budget ??
+    (event ? createBudgetPlan(event.budget, event.type, 10, event.priorities) : null)
+  const tasks =
+    overrides.tasks ??
+    (event ? generateTimeline(event.type, event.date, new Date(), event.guestCount) : [])
+  const budgetSummary =
+    event && budget
+      ? calculateBudgetSummary(budget, event.budget, event.guestCount, event.currency)
+      : null
+
+  return {
+    schemaVersion: 2,
+    event,
+    budget,
+    tasks,
+    vendors: overrides.vendors ?? getSampleVendors(),
+    recommendations:
+      overrides.recommendations ??
+      (event && budgetSummary ? generateRecommendations(event, budgetSummary) : []),
+    lastReplan: overrides.lastReplan ?? null,
+    lastSaved: overrides.lastSaved ?? new Date().toISOString(),
+  }
+}
+
+export function seedAppState(overrides: Partial<AppState> = {}): AppState {
+  const state = makeAppState(overrides)
+  saveState(state)
+  return state
 }

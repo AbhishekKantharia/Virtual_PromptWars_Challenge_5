@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { EventDetails, ValidationError } from '../../types'
 import { validateEventDetails, sanitizeText, isShortNotice } from '../../engine/validation'
@@ -26,6 +26,22 @@ const PRIORITY_OPTIONS = [
 
 const defaultDate = format(addMonths(new Date(), 6), 'yyyy-MM-dd')
 
+const FIELD_TARGETS: Record<string, string> = {
+  name: 'event-name',
+  type: 'event-type',
+  date: 'event-date',
+  city: 'event-city',
+  guestCount: 'event-guests',
+  budget: 'event-budget',
+  currency: 'event-currency',
+  preference: 'event-preference',
+  theme: 'event-theme',
+  dietaryRequirements: 'event-dietary',
+  accessibilityNeeds: 'event-accessibility',
+  notes: 'event-notes',
+  priorities: 'event-priorities',
+}
+
 export function EventSetup({ onNavigate }: EventSetupProps) {
   const { state, dispatch } = useApp()
   const existing = state.event
@@ -50,8 +66,14 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
   const [errors, setErrors] = useState<ValidationError[]>([])
   const [submitted, setSubmitted] = useState(false)
   const [pendingTypeChange, setPendingTypeChange] = useState<EventDetails | null>(null)
+  const [errorFocusToken, setErrorFocusToken] = useState(0)
+  const errorSummaryRef = useRef<HTMLDivElement>(null)
 
   const isEditing = !!existing
+
+  useEffect(() => {
+    if (errorFocusToken > 0) errorSummaryRef.current?.focus()
+  }, [errorFocusToken])
 
   function fieldError(field: string) {
     return errors.find((e) => e.field === field)?.message
@@ -83,7 +105,10 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
     setSubmitted(true)
     const result = validateEventDetails(form)
     setErrors(result.errors)
-    if (!result.valid) return
+    if (!result.valid) {
+      setErrorFocusToken((token) => token + 1)
+      return
+    }
 
     const now = new Date().toISOString()
     const eventData: EventDetails = {
@@ -206,7 +231,9 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
                 min={format(new Date(), 'yyyy-MM-dd')}
                 aria-required="true"
                 aria-invalid={!!fieldError('date')}
-                aria-describedby="event-date-desc"
+                aria-describedby={
+                  fieldError('date') ? 'event-date-desc event-date-error' : 'event-date-desc'
+                }
               />
               <span id="event-date-desc" className="form-hint">
                 {veryShortNotice && <span className="text-danger">Very short notice — some tasks may be skipped</span>}
@@ -214,7 +241,7 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
                 {!shortNotice && 'YYYY-MM-DD format'}
               </span>
               {fieldError('date') && (
-                <span className="form-error" role="alert">
+                <span id="event-date-error" className="form-error" role="alert">
                   <AlertTriangle size={12} aria-hidden="true" /> {fieldError('date')}
                 </span>
               )}
@@ -262,14 +289,21 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
               <label className="form-label required" htmlFor="event-preference">Venue Preference</label>
               <select
                 id="event-preference"
-                className="form-select"
+                className={`form-select${fieldError('preference') ? ' error' : ''}`}
                 value={form.preference ?? 'flexible'}
                 onChange={(e) => handleChange('preference', e.target.value)}
+                aria-invalid={!!fieldError('preference')}
+                aria-describedby={fieldError('preference') ? 'event-preference-error' : undefined}
               >
                 <option value="indoor">Indoor</option>
                 <option value="outdoor">Outdoor</option>
                 <option value="flexible">Flexible</option>
               </select>
+              {fieldError('preference') && (
+                <span id="event-preference-error" className="form-error" role="alert">
+                  <AlertTriangle size={12} aria-hidden="true" /> {fieldError('preference')}
+                </span>
+              )}
             </div>
 
             <div className="form-group">
@@ -301,14 +335,21 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
               <label className="form-label required" htmlFor="event-currency">Currency</label>
               <select
                 id="event-currency"
-                className="form-select"
+                className={`form-select${fieldError('currency') ? ' error' : ''}`}
                 value={form.currency ?? 'USD'}
                 onChange={(e) => handleChange('currency', e.target.value)}
+                aria-invalid={!!fieldError('currency')}
+                aria-describedby={fieldError('currency') ? 'event-currency-error' : undefined}
               >
                 {CURRENCY_OPTIONS.map((c) => (
                   <option key={c.value} value={c.value}>{c.label}</option>
                 ))}
               </select>
+              {fieldError('currency') && (
+                <span id="event-currency-error" className="form-error" role="alert">
+                  <AlertTriangle size={12} aria-hidden="true" /> {fieldError('currency')}
+                </span>
+              )}
             </div>
           </div>
         </div>
@@ -365,7 +406,12 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
           </div>
 
           <div className="form-group" style={{ marginTop: '1rem' }}>
-            <fieldset>
+            <fieldset
+              id="event-priorities"
+              tabIndex={-1}
+              aria-invalid={!!fieldError('priorities')}
+              aria-describedby={fieldError('priorities') ? 'event-priorities-error' : undefined}
+            >
               <legend className="form-label">Planning Priorities (select all that apply)</legend>
               <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.5rem', marginTop: '0.5rem' }}>
                 {PRIORITY_OPTIONS.map((p) => {
@@ -401,6 +447,11 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
                   )
                 })}
               </div>
+              {fieldError('priorities') && (
+                <span id="event-priorities-error" className="form-error" role="alert">
+                  <AlertTriangle size={12} aria-hidden="true" /> {fieldError('priorities')}
+                </span>
+              )}
             </fieldset>
           </div>
 
@@ -421,18 +472,36 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
         {/* Error summary */}
         {submitted && errors.length > 0 && (
           <div
+            ref={errorSummaryRef}
+            tabIndex={-1}
             className="alert alert-danger"
             role="alert"
-            aria-live="polite"
             style={{ marginTop: '1.5rem' }}
           >
             <AlertTriangle size={16} className="alert-icon" aria-hidden="true" />
             <div>
               <strong>Please fix the following errors:</strong>
               <ul style={{ marginTop: '0.5rem', paddingLeft: '1rem' }}>
-                {errors.map((e) => (
-                  <li key={e.field}>{e.message}</li>
-                ))}
+                {errors.map((e) => {
+                  const targetId = FIELD_TARGETS[e.field]
+                  return (
+                    <li key={e.field}>
+                      {targetId ? (
+                        <a
+                          href={`#${targetId}`}
+                          onClick={(event) => {
+                            event.preventDefault()
+                            document.getElementById(targetId)?.focus()
+                          }}
+                        >
+                          {e.message}
+                        </a>
+                      ) : (
+                        e.message
+                      )}
+                    </li>
+                  )
+                })}
               </ul>
             </div>
           </div>

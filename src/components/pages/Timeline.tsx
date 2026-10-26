@@ -329,27 +329,35 @@ export function Timeline() {
                   borderBottom: i < filtered.length - 1 ? '1px solid var(--color-warm-gray-100)' : 'none',
                   background: task.status === 'blocked' ? '#fff8f0' : '#fff',
                 }}>
-                  {/* Complete/Reopen button */}
+                   {/* Complete/Reopen button */}
                   <button
+                    type="button"
                     onClick={() => {
+                      if (isDependencyBlocked) return
                       if (task.status === 'complete') dispatch({ type: 'REOPEN_TASK', taskId: task.id })
                       else dispatch({ type: 'COMPLETE_TASK', taskId: task.id })
                     }}
                     className={`task-checkbox${task.status === 'complete' ? ' checked' : ''}`}
                     aria-label={
                       isDependencyBlocked
-                        ? `Cannot complete ${task.title} until its dependencies are complete`
+                        ? `Cannot complete ${task.title}`
                         : task.status === 'complete'
                           ? `Reopen: ${task.title}`
                           : `Complete: ${task.title}`
                     }
                     aria-pressed={task.status === 'complete'}
-                    disabled={isDependencyBlocked}
+                    aria-disabled={isDependencyBlocked || undefined}
+                    aria-describedby={isDependencyBlocked ? `task-${task.id}-blocked` : undefined}
                     title={isDependencyBlocked ? 'Complete the task dependencies first' : undefined}
-                    style={{ marginTop: '2px' }}
+                    style={{ marginTop: '2px', cursor: isDependencyBlocked ? 'not-allowed' : 'pointer' }}
                   >
                     {task.status === 'complete' && <Check size={11} style={{ color: '#fff' }} aria-hidden="true" />}
                   </button>
+                  {isDependencyBlocked && (
+                    <span id={`task-${task.id}-blocked`} className="sr-only">
+                      Complete the task dependencies first.
+                    </span>
+                  )}
 
                   <div style={{ flex: 1, minWidth: 0 }}>
                     <div style={{ display: 'flex', alignItems: 'flex-start', gap: '0.5rem', flexWrap: 'wrap' }}>
@@ -359,10 +367,10 @@ export function Timeline() {
                       <span className={`badge badge-${task.priority === 'critical' ? 'danger' : task.priority === 'high' ? 'warning' : 'gray'}`}>
                         {task.priority}
                       </span>
-                      {task.status === 'blocked' && (
+                      {(task.status === 'blocked' || isDependencyBlocked) && (
                         <span className="badge badge-warning">
                           <Lock size={10} aria-hidden="true" />{' '}
-                          {isDependencyBlocked ? 'blocked by dependency' : 'blocked'}
+                          blocked{isDependencyBlocked ? ' by dependency' : ''}
                         </span>
                       )}
                       {isOverdue && (

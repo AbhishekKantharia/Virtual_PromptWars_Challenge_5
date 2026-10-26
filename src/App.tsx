@@ -17,20 +17,78 @@ function AppInner() {
   const [page, setPage] = useState<Page>(state.event ? 'dashboard' : 'setup')
   const [sidebarOpen, setSidebarOpen] = useState(false)
   const mainRef = useRef<HTMLElement>(null)
+  const sidebarRef = useRef<HTMLElement>(null)
+  const toggleRef = useRef<HTMLButtonElement>(null)
+  const restoreSidebarFocus = useRef(true)
   const firstRender = useRef(true)
 
   const navigate = (p: Page) => {
-    setPage(p)
+    if (p !== page) {
+      setPage(p)
+      restoreSidebarFocus.current = false
+    }
     setSidebarOpen(false)
   }
 
   useEffect(() => {
+    if (!sidebarOpen) return
+
+    const sidebar = sidebarRef.current
+    const toggle = toggleRef.current
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+
+    const getFocusable = () =>
+      sidebar
+        ? Array.from(
+            sidebar.querySelectorAll<HTMLElement>(
+              'button:not([disabled]), a[href], input, select, textarea, [tabindex]:not([tabindex="-1"])'
+            )
+          )
+        : []
+
+    getFocusable()[0]?.focus()
+
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setSidebarOpen(false)
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        setSidebarOpen(false)
+        return
+      }
+      if (event.key !== 'Tab') return
+
+      const focusable = getFocusable()
+      if (focusable.length === 0) {
+        event.preventDefault()
+        return
+      }
+
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      const active = document.activeElement
+
+      if (!sidebar?.contains(active)) {
+        event.preventDefault()
+        first.focus()
+      } else if (event.shiftKey && active === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && active === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
-    window.addEventListener('keydown', onKeyDown)
-    return () => window.removeEventListener('keydown', onKeyDown)
-  }, [])
+
+    document.addEventListener('keydown', onKeyDown)
+    return () => {
+      document.removeEventListener('keydown', onKeyDown)
+      document.body.style.overflow = previousOverflow
+      if (restoreSidebarFocus.current && toggle && document.contains(toggle)) {
+        toggle.focus()
+      }
+      restoreSidebarFocus.current = true
+    }
+  }, [sidebarOpen])
 
   useEffect(() => {
     if (firstRender.current) {
@@ -49,8 +107,9 @@ function AppInner() {
 
       {/* Mobile toggle */}
       <button
+        ref={toggleRef}
         className="mobile-nav-toggle"
-        onClick={() => setSidebarOpen((o) => !o)}
+        onClick={() => setSidebarOpen((open) => !open)}
         aria-label={sidebarOpen ? 'Close navigation menu' : 'Open navigation menu'}
         aria-expanded={sidebarOpen}
         aria-controls="sidebar-nav"
@@ -69,6 +128,7 @@ function AppInner() {
 
       <Sidebar
         id="sidebar-nav"
+        navRef={sidebarRef}
         currentPage={page}
         onNavigate={navigate}
         isOpen={sidebarOpen}

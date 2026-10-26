@@ -7,6 +7,7 @@ import {
 
 interface SidebarProps {
   id: string
+  navRef?: React.RefObject<HTMLElement>
   currentPage: Page
   onNavigate: (page: Page) => void
   isOpen: boolean
@@ -23,10 +24,11 @@ const NAV_ITEMS: { page: Page; label: string; icon: React.ReactNode; requiresEve
   { page: 'settings', label: 'Settings', icon: <Settings size={16} /> },
 ]
 
-export function Sidebar({ id, currentPage, onNavigate, isOpen, hasEvent }: SidebarProps) {
+export function Sidebar({ id, navRef, currentPage, onNavigate, isOpen, hasEvent }: SidebarProps) {
   return (
     <nav
       id={id}
+      ref={navRef}
       className={`sidebar${isOpen ? ' open' : ''}`}
       aria-label="Main navigation"
     >
@@ -42,19 +44,28 @@ export function Sidebar({ id, currentPage, onNavigate, isOpen, hasEvent }: Sideb
         <ul style={{ listStyle: 'none' }}>
           {NAV_ITEMS.map(({ page, label, icon, requiresEvent }) => {
             const disabled = requiresEvent && !hasEvent
+            const hintId = `nav-${page}-hint`
             return (
               <li key={page}>
                 <button
                   className={`nav-item${currentPage === page ? ' active' : ''}`}
-                  onClick={() => !disabled && onNavigate(page)}
+                  onClick={() => {
+                    if (!disabled) onNavigate(page)
+                  }}
                   aria-current={currentPage === page ? 'page' : undefined}
-                  disabled={disabled}
+                  aria-disabled={disabled || undefined}
+                  aria-describedby={disabled ? hintId : undefined}
                   title={disabled ? 'Create an event first' : undefined}
-                  style={{ opacity: disabled ? 0.4 : 1 }}
+                  style={{ opacity: disabled ? 0.4 : 1, cursor: disabled ? 'not-allowed' : 'pointer' }}
                 >
                   <span aria-hidden="true">{icon}</span>
                   {label}
                 </button>
+                {disabled && (
+                  <span id={hintId} className="sr-only">
+                    Create an event first to use {label}.
+                  </span>
+                )}
               </li>
             )
           })}

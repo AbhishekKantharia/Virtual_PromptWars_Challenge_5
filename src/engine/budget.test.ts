@@ -3,6 +3,7 @@ import {
   addExpense,
   calculateBudgetSummary,
   createBudgetPlan,
+  reallocateBudget,
   rebalanceBudget,
   setContingencyPercent,
   updateCategoryAmount,
@@ -101,5 +102,29 @@ describe('budget engine', () => {
     const updated = updateCategoryAmount(plan, venue.id, -500)
 
     expect(updated.categories[0].plannedAmount).toBe(0)
+  })
+
+  it('reallocates by priorities without losing expense category links', () => {
+    const plan = createBudgetPlan(10000, 'birthday', 10, [])
+    const venue = plan.categories.find((category) => category.name === 'Venue')!
+    const withExpense = addExpense(plan, {
+      categoryId: venue.id,
+      label: 'Room deposit',
+      amount: 1500,
+      isQuoted: true,
+      notes: '',
+    })
+    const reallocated = reallocateBudget(withExpense, 10000, 'birthday', ['Catering quality'])
+
+    expect(reallocated.expenses).toHaveLength(1)
+    expect(reallocated.expenses[0].categoryId).toBe(venue.id)
+    expect(
+      reallocated.categories.find((category) => category.name === 'Catering & Food')!
+        .plannedAmount
+    ).not.toBeLessThan(
+      withExpense.categories.find((category) => category.name === 'Catering & Food')!
+        .plannedAmount
+    )
+    expect(plannedTotal(reallocated)).toBe(9000)
   })
 })

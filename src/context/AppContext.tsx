@@ -28,6 +28,7 @@ import {
   editExpense as editExpenseRecord,
   deleteExpense as deleteExpenseRecord,
   updateCategoryAmount,
+  reallocateBudget,
   setContingencyPercent,
   calculateBudgetSummary,
 } from '../engine/budget';
@@ -51,6 +52,7 @@ export type Action =
   | { type: 'CREATE_EVENT'; payload: EventDetails }
   | { type: 'UPDATE_EVENT'; payload: Partial<EventDetails> }
   | { type: 'UPDATE_CATEGORY_AMOUNT'; categoryId: string; amount: number }
+  | { type: 'REALLOCATE_BUDGET' }
   | { type: 'SET_CONTINGENCY'; percent: number }
   | { type: 'ADD_EXPENSE'; payload: Omit<Expense, 'id' | 'createdAt'> }
   | { type: 'EDIT_EXPENSE'; expenseId: string; patch: Partial<Expense> }
@@ -127,6 +129,17 @@ export function appReducer(state: AppState, action: Action): AppState {
     case 'UPDATE_CATEGORY_AMOUNT': {
       if (!state.event || !state.budget) return state;
       const budget = updateCategoryAmount(state.budget, action.categoryId, action.amount);
+      return withDerived(state, state.event, budget, state.tasks, state.vendors);
+    }
+
+    case 'REALLOCATE_BUDGET': {
+      if (!state.event || !state.budget) return state;
+      const budget = reallocateBudget(
+        state.budget,
+        state.event.budget,
+        state.event.type,
+        state.event.priorities
+      );
       return withDerived(state, state.event, budget, state.tasks, state.vendors);
     }
 

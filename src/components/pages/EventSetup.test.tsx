@@ -31,6 +31,7 @@ describe('EventSetup accessibility and validation', () => {
     expect(nameField).toHaveAttribute('aria-invalid', 'true')
     expect(screen.getAllByText(/Event name must be at least 2 characters/i).length).toBeGreaterThan(0)
     expect(screen.getAllByRole('alert').length).toBeGreaterThan(0)
+    expect(document.activeElement).toHaveAttribute('role', 'alert')
   })
 
   it('accepts a valid event and navigates to the dashboard', async () => {

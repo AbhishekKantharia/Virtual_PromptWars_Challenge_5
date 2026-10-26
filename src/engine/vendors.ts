@@ -27,12 +27,30 @@ export const VENDOR_CATEGORIES = [
 
 export type VendorCategory = (typeof VENDOR_CATEGORIES)[number];
 
+const VENDOR_STATUSES: VendorStatus[] = [
+  'researching',
+  'contacted',
+  'quoted',
+  'booked',
+  'cancelled',
+];
+
 /** Validate a vendor form before it is stored or exported. */
 export function validateVendor(
   vendor: Omit<Vendor, 'id' | 'createdAt' | 'isSampleData'>
 ): ValidationResult {
   const errors: ValidationError[] = [];
-  const name = vendor.name.trim();
+  const name = typeof vendor.name === 'string' ? vendor.name.trim() : '';
+  const contactName = typeof vendor.contactName === 'string' ? vendor.contactName.trim() : '';
+  const contactEmail = typeof vendor.contactEmail === 'string' ? vendor.contactEmail : '';
+  const contactPhone = typeof vendor.contactPhone === 'string' ? vendor.contactPhone : '';
+  const notes = typeof vendor.notes === 'string' ? vendor.notes : '';
+  const cancellationTerms =
+    typeof vendor.cancellationTerms === 'string' ? vendor.cancellationTerms : '';
+  const accessibilityInfo =
+    typeof vendor.accessibilityInfo === 'string' ? vendor.accessibilityInfo : '';
+  const reviewNotes = typeof vendor.reviewNotes === 'string' ? vendor.reviewNotes : '';
+
   if (name.length < 2) {
     errors.push({ field: 'name', message: 'Vendor name must be at least 2 characters.' });
   }
@@ -42,34 +60,44 @@ export function validateVendor(
   if (!VENDOR_CATEGORIES.includes(vendor.category as (typeof VENDOR_CATEGORIES)[number])) {
     errors.push({ field: 'category', message: 'Choose a valid vendor category.' });
   }
+  if (!VENDOR_STATUSES.includes(vendor.status)) {
+    errors.push({ field: 'status', message: 'Choose a valid vendor status.' });
+  }
+  if (contactName.length > 80) {
+    errors.push({ field: 'contactName', message: 'Contact name must be 80 characters or fewer.' });
+  }
   if (!Number.isFinite(vendor.estimatedCost) || vendor.estimatedCost < 0) {
     errors.push({ field: 'estimatedCost', message: 'Estimated cost must be zero or more.' });
+  } else if (vendor.estimatedCost > 100_000_000) {
+    errors.push({ field: 'estimatedCost', message: 'Estimated cost exceeds the allowed maximum.' });
   }
   if (
     vendor.quotedCost !== undefined &&
     (!Number.isFinite(vendor.quotedCost) || vendor.quotedCost < 0)
   ) {
     errors.push({ field: 'quotedCost', message: 'Quoted cost must be zero or more.' });
+  } else if (vendor.quotedCost !== undefined && vendor.quotedCost > 100_000_000) {
+    errors.push({ field: 'quotedCost', message: 'Quoted cost exceeds the allowed maximum.' });
   }
-  if (vendor.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vendor.contactEmail)) {
+  if (contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(contactEmail)) {
     errors.push({ field: 'contactEmail', message: 'Enter a valid email address or leave it blank.' });
   }
-  if (vendor.contactEmail.length > 150) {
+  if (contactEmail.length > 150) {
     errors.push({ field: 'contactEmail', message: 'Email must be 150 characters or fewer.' });
   }
-  if (vendor.contactPhone.length > 30) {
+  if (contactPhone.length > 30) {
     errors.push({ field: 'contactPhone', message: 'Phone must be 30 characters or fewer.' });
   }
-  if (vendor.cancellationTerms.length > 300) {
+  if (cancellationTerms.length > 300) {
     errors.push({ field: 'cancellationTerms', message: 'Cancellation terms must be 300 characters or fewer.' });
   }
-  if (vendor.accessibilityInfo.length > 300) {
+  if (accessibilityInfo.length > 300) {
     errors.push({ field: 'accessibilityInfo', message: 'Accessibility info must be 300 characters or fewer.' });
   }
-  if (vendor.notes.length > 500) {
+  if (notes.length > 500) {
     errors.push({ field: 'notes', message: 'Notes must be 500 characters or fewer.' });
   }
-  if ((vendor.reviewNotes ?? '').length > 500) {
+  if (reviewNotes.length > 500) {
     errors.push({ field: 'reviewNotes', message: 'Review notes must be 500 characters or fewer.' });
   }
   return { valid: errors.length === 0, errors };
@@ -93,9 +121,43 @@ export function addVendor(vendors: Vendor[], vendor: Omit<Vendor, 'id' | 'create
   return [...vendors, createVendor(vendor)];
 }
 
-/** Edit an existing vendor. */
+/**
+ * Edit an existing vendor. Immutable identity fields are ignored even if a
+ * caller supplies them, and an invalid patch leaves the record unchanged.
+ */
 export function editVendor(vendors: Vendor[], vendorId: string, patch: Partial<Vendor>): Vendor[] {
-  return vendors.map((v) => (v.id === vendorId ? { ...v, ...patch } : v));
+  return vendors.map((vendor) => {
+    if (vendor.id !== vendorId) return vendor;
+    const merged = { ...vendor, ...patch };
+    const candidate = {
+      name: merged.name,
+      category: merged.category,
+      estimatedCost: merged.estimatedCost,
+      quotedCost: merged.quotedCost,
+      contactName: merged.contactName,
+      contactEmail: merged.contactEmail,
+      contactPhone: merged.contactPhone,
+      status: merged.status,
+      notes: merged.notes,
+      cancellationTerms: merged.cancellationTerms,
+      accessibilityInfo: merged.accessibilityInfo,
+      reviewNotes: merged.reviewNotes,
+    };
+
+    if (!validateVendor(candidate).valid) return vendor;
+
+    return {
+      ...vendor,
+      ...candidate,
+      name: candidate.name.trim(),
+      contactName: candidate.contactName.trim(),
+      contactEmail: candidate.contactEmail.trim(),
+      contactPhone: candidate.contactPhone.trim(),
+      id: vendor.id,
+      createdAt: vendor.createdAt,
+      isSampleData: vendor.isSampleData,
+    };
+  });
 }
 
 /** Remove a vendor. */

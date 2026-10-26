@@ -92,8 +92,9 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             </ul>
             {state.lastReplan.tasksPreserved > 0 && (
               <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
-                {state.lastReplan.tasksPreserved} completed or user-edited task(s) were preserved.
-                Vendors and expenses were not discarded.
+                {state.lastReplan.tasksPreserved} existing task(s) were preserved, including
+                completed, in-progress, user-edited, and user-added tasks. Vendors and expenses
+                were not discarded.
               </p>
             )}
             {state.lastReplan.tasksAdded > 0 && (
