@@ -1,5 +1,5 @@
 // ============================================================
-// EventWise AI — Timeline Generation Engine
+// EventWise AI  -  Timeline Generation Engine
 // Generates calendar-accurate task lists based on event type,
 // date, and complexity. Pure functions, deterministic.
 // ============================================================
@@ -110,7 +110,7 @@ const SHARED_TEMPLATES: TaskTemplate[] = [
     minDaysNotice: 2,
   },
   {
-    title: 'Event day — setup',
+    title: 'Event day  -  setup',
     description: 'Arrive early for decoration, AV checks, and final coordination.',
     daysBeforeEvent: 0,
     priority: 'critical',
@@ -216,7 +216,7 @@ const BIRTHDAY_TEMPLATES: TaskTemplate[] = [
 ];
 
 // ----------------------------------------------------------------
-// Community event–specific templates
+// Community event-specific templates
 // ----------------------------------------------------------------
 const COMMUNITY_TEMPLATES: TaskTemplate[] = [
   {
@@ -405,10 +405,9 @@ export function reopenTask(tasks: Task[], taskId: string): Task[] {
  * complete become blocked. Dependencies that no longer exist are ignored,
  * which prevents permanent accidental blocking after a replan or deletion.
  */
-export function auditTasks(tasks: Task[], today: Date = new Date()): Task[] {
+export function auditTasks(tasks: Task[], _today: Date = new Date()): Task[] {
   const completedIds = new Set(tasks.filter((t) => t.status === 'complete').map((t) => t.id));
   const existingIds = new Set(tasks.map((t) => t.id));
-  const baseToday = startOfDay(today);
 
   return tasks.map((task) => {
     if (task.status === 'complete') return task;

@@ -2,9 +2,10 @@ import React, { useState, useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
 import { Task, TaskStatus, TaskPriority } from '../../types'
 import { format, parseISO, differenceInDays, isValid } from 'date-fns'
-import { Check, RotateCcw, Plus, Edit2, Trash2, AlertTriangle, Clock, Lock, Search } from 'lucide-react'
-
-type Filter = 'all' | TaskStatus | TaskPriority
+import { Check, Plus, Edit2, Trash2, AlertTriangle, Clock, Lock, Search } from 'lucide-react'
+import { auditTasks, isTaskOverdue } from '../../engine/timeline'
+import { sanitizeText } from '../../engine/validation'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 
 export function Timeline() {
   const { state, dispatch } = useApp()
@@ -17,11 +18,26 @@ export function Timeline() {
   const [taskForm, setTaskForm] = useState<Partial<Task>>({
     title: '', description: '', dueDate: '', priority: 'medium', category: '', status: 'pending', dependsOn: []
   })
+  const [formError, setFormError] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Task | null>(null)
 
   const today = new Date()
+  const auditedTasks = useMemo(() => auditTasks(tasks), [tasks])
+  const dependencyBlockedIds = useMemo(() => {
+    const completeIds = new Set(tasks.filter((t) => t.status === 'complete').map((t) => t.id))
+    return new Set(
+      tasks
+        .filter(
+          (task) =>
+            task.status !== 'complete' &&
+            task.dependsOn.some((id) => !completeIds.has(id))
+        )
+        .map((task) => task.id)
+    )
+  }, [tasks])
 
   const filtered = useMemo(() => {
-    return tasks
+    return auditedTasks
       .filter((t) => {
         if (statusFilter !== 'all' && t.status !== statusFilter) return false
         if (priorityFilter !== 'all' && t.priority !== priorityFilter) return false
@@ -29,7 +45,7 @@ export function Timeline() {
         return true
       })
       .sort((a, b) => a.dueDate.localeCompare(b.dueDate))
-  }, [tasks, statusFilter, priorityFilter, search])
+  }, [auditedTasks, statusFilter, priorityFilter, search])
 
   if (!event) {
     return (
@@ -43,30 +59,56 @@ export function Timeline() {
     )
   }
 
-  const total = tasks.length
-  const completed = tasks.filter((t) => t.status === 'complete').length
+  const total = auditedTasks.length
+  const completed = auditedTasks.filter((t) => t.status === 'complete').length
 
   function startEdit(task: Task) {
     setEditingTask(task)
     setTaskForm({ ...task })
+    setFormError('')
     setShowForm(true)
   }
 
   function submitForm(e: React.FormEvent) {
     e.preventDefault()
-    if (!taskForm.title || !taskForm.dueDate) return
+    const title = sanitizeText(taskForm.title ?? '').slice(0, 120)
+    const description = sanitizeText(taskForm.description ?? '').slice(0, 500)
+    const category = sanitizeText(taskForm.category ?? '').slice(0, 60) || 'Custom'
+    const dueDate = taskForm.dueDate ?? ''
+
+    if (title.length < 2) {
+      setFormError('Enter a task title of at least 2 characters.')
+      return
+    }
+    if (!isValid(parseISO(dueDate))) {
+      setFormError('Choose a valid due date.')
+      return
+    }
+
     if (editingTask) {
-      dispatch({ type: 'EDIT_TASK', taskId: editingTask.id, patch: taskForm })
+      dispatch({
+        type: 'EDIT_TASK',
+        taskId: editingTask.id,
+        patch: {
+          title,
+          description,
+          category,
+          dueDate,
+          dependsOn: editingTask.dependsOn,
+          priority: (taskForm.priority as TaskPriority) ?? 'medium',
+          status: (taskForm.status as TaskStatus) ?? 'pending',
+        },
+      })
     } else {
       dispatch({
         type: 'ADD_TASK',
         payload: {
-          title: taskForm.title!,
-          description: taskForm.description ?? '',
-          dueDate: taskForm.dueDate!,
-          priority: taskForm.priority as TaskPriority ?? 'medium',
+          title,
+          description,
+          dueDate,
+          priority: (taskForm.priority as TaskPriority) ?? 'medium',
           status: 'pending',
-          category: taskForm.category ?? 'Custom',
+          category,
           dependsOn: [],
           completedAt: undefined,
         },
@@ -78,6 +120,7 @@ export function Timeline() {
   function resetForm() {
     setShowForm(false)
     setEditingTask(null)
+    setFormError('')
     setTaskForm({ title: '', description: '', dueDate: '', priority: 'medium', category: '', status: 'pending', dependsOn: [] })
   }
 
@@ -89,7 +132,15 @@ export function Timeline() {
             <h1>Planning Timeline</h1>
             <p>{completed} of {total} tasks complete</p>
           </div>
-          <button className="btn btn-primary" onClick={() => setShowForm(true)}>
+          <button
+            className="btn btn-primary"
+            onClick={() => {
+              setEditingTask(null)
+              setFormError('')
+              setTaskForm({ title: '', description: '', dueDate: '', priority: 'medium', category: '', status: 'pending', dependsOn: [] })
+              setShowForm(true)
+            }}
+          >
             <Plus size={15} aria-hidden="true" /> Add Task
           </button>
         </div>
@@ -118,7 +169,7 @@ export function Timeline() {
             type="search"
             className="form-input"
             style={{ paddingLeft: '30px' }}
-            placeholder="Search tasks…"
+            placeholder="Search tasks..."
             value={search}
             onChange={(e) => setSearch(e.target.value)}
             aria-label="Search tasks"
@@ -156,7 +207,13 @@ export function Timeline() {
       {showForm && (
         <div className="card" style={{ marginBottom: '1.5rem', border: '2px solid var(--color-plum-200)' }}>
           <h2 className="card-title" style={{ marginBottom: '1rem' }}>{editingTask ? 'Edit Task' : 'New Task'}</h2>
-          <form onSubmit={submitForm} aria-label={editingTask ? 'Edit task form' : 'Add task form'}>
+          <form onSubmit={submitForm} aria-label={editingTask ? 'Edit task form' : 'Add task form'} noValidate>
+            {formError && (
+              <div id="task-form-error" className="alert alert-danger" role="alert" style={{ marginBottom: '1rem' }}>
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span>{formError}</span>
+              </div>
+            )}
             <div className="form-grid">
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
                 <label className="form-label required" htmlFor="task-title">Task Title</label>
@@ -168,6 +225,8 @@ export function Timeline() {
                   onChange={(e) => setTaskForm((f) => ({ ...f, title: e.target.value }))}
                   required
                   maxLength={120}
+                  aria-invalid={formError.includes('title')}
+                  aria-describedby="task-form-error"
                 />
               </div>
               <div className="form-group" style={{ gridColumn: '1 / -1' }}>
@@ -190,6 +249,8 @@ export function Timeline() {
                   value={taskForm.dueDate ?? ''}
                   onChange={(e) => setTaskForm((f) => ({ ...f, dueDate: e.target.value }))}
                   required
+                  aria-invalid={formError.includes('date')}
+                  aria-describedby="task-form-error"
                 />
               </div>
               <div className="form-group">
@@ -252,11 +313,12 @@ export function Timeline() {
         </div>
       ) : (
         <div className="card" style={{ padding: '0' }}>
-          <ul role="list" style={{ listStyle: 'none' }}>
+          <ul style={{ listStyle: 'none' }}>
             {filtered.map((task, i) => {
               const dueDate = parseISO(task.dueDate)
               const daysLeft = isValid(dueDate) ? differenceInDays(dueDate, today) : null
-              const isOverdue = daysLeft !== null && daysLeft < 0 && task.status !== 'complete'
+              const isOverdue = isTaskOverdue(task)
+              const isDependencyBlocked = dependencyBlockedIds.has(task.id)
 
               return (
                 <li key={task.id} style={{
@@ -274,8 +336,16 @@ export function Timeline() {
                       else dispatch({ type: 'COMPLETE_TASK', taskId: task.id })
                     }}
                     className={`task-checkbox${task.status === 'complete' ? ' checked' : ''}`}
-                    aria-label={task.status === 'complete' ? `Reopen: ${task.title}` : `Complete: ${task.title}`}
+                    aria-label={
+                      isDependencyBlocked
+                        ? `Cannot complete ${task.title} until its dependencies are complete`
+                        : task.status === 'complete'
+                          ? `Reopen: ${task.title}`
+                          : `Complete: ${task.title}`
+                    }
                     aria-pressed={task.status === 'complete'}
+                    disabled={isDependencyBlocked}
+                    title={isDependencyBlocked ? 'Complete the task dependencies first' : undefined}
                     style={{ marginTop: '2px' }}
                   >
                     {task.status === 'complete' && <Check size={11} style={{ color: '#fff' }} aria-hidden="true" />}
@@ -291,11 +361,18 @@ export function Timeline() {
                       </span>
                       {task.status === 'blocked' && (
                         <span className="badge badge-warning">
-                          <Lock size={10} aria-hidden="true" /> blocked
+                          <Lock size={10} aria-hidden="true" />{' '}
+                          {isDependencyBlocked ? 'blocked by dependency' : 'blocked'}
                         </span>
+                      )}
+                      {isOverdue && (
+                        <span className="badge badge-danger">overdue</span>
                       )}
                       {task.isGenerated && (
                         <span className="badge badge-navy" title="Auto-generated task">generated</span>
+                      )}
+                      {task.isUserEdited && (
+                        <span className="badge badge-gray" title="Edited by you; preserved on replan">edited</span>
                       )}
                     </div>
                     {task.description && (
@@ -322,7 +399,7 @@ export function Timeline() {
                     </button>
                     <button
                       className="btn btn-ghost btn-icon btn-sm"
-                      onClick={() => dispatch({ type: 'DELETE_TASK', taskId: task.id })}
+                      onClick={() => setDeleteTarget(task)}
                       aria-label={`Delete: ${task.title}`}
                     >
                       <Trash2 size={13} aria-hidden="true" />
@@ -334,6 +411,22 @@ export function Timeline() {
           </ul>
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete this task?"
+        description={
+          deleteTarget
+            ? `This permanently removes "${deleteTarget.title}" from your timeline. Other tasks that depend on it will no longer be blocked by it.`
+            : ''
+        }
+        confirmLabel="Delete task"
+        onConfirm={() => {
+          if (deleteTarget) dispatch({ type: 'DELETE_TASK', taskId: deleteTarget.id })
+          setDeleteTarget(null)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

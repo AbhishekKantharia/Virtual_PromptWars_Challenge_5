@@ -6,6 +6,7 @@ import { CURRENCY_OPTIONS } from '../../utils/currency'
 import { format, addMonths } from 'date-fns'
 import { nanoid } from '../../utils/nanoid'
 import { AlertTriangle, CheckCircle, Info } from 'lucide-react'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 import type { Page } from '../../App'
 
 interface EventSetupProps {
@@ -13,9 +14,9 @@ interface EventSetupProps {
 }
 
 const EVENT_TYPE_OPTIONS = [
-  { value: 'wedding', label: '💍 Wedding' },
-  { value: 'birthday', label: '🎂 Birthday' },
-  { value: 'community', label: '🌟 Community Event' },
+  { value: 'wedding', label: 'Wedding' },
+  { value: 'birthday', label: 'Birthday' },
+  { value: 'community', label: 'Community Event' },
 ]
 
 const PRIORITY_OPTIONS = [
@@ -48,6 +49,7 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
   )
   const [errors, setErrors] = useState<ValidationError[]>([])
   const [submitted, setSubmitted] = useState(false)
+  const [pendingTypeChange, setPendingTypeChange] = useState<EventDetails | null>(null)
 
   const isEditing = !!existing
 
@@ -103,11 +105,20 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
       updatedAt: now,
     }
 
+    if (isEditing && existing && eventData.type !== existing.type) {
+      setPendingTypeChange(eventData)
+      return
+    }
+    persistEvent(eventData)
+  }
+
+  function persistEvent(eventData: EventDetails) {
     if (isEditing) {
       dispatch({ type: 'UPDATE_EVENT', payload: eventData })
     } else {
       dispatch({ type: 'CREATE_EVENT', payload: eventData })
     }
+    setPendingTypeChange(null)
     onNavigate('dashboard')
   }
 
@@ -198,8 +209,8 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
                 aria-describedby="event-date-desc"
               />
               <span id="event-date-desc" className="form-hint">
-                {veryShortNotice && <span className="text-danger">⚠ Very short notice — some tasks may be skipped</span>}
-                {!veryShortNotice && shortNotice && <span className="text-warning">⚠ Short notice — timeline will be condensed</span>}
+                {veryShortNotice && <span className="text-danger">Very short notice — some tasks may be skipped</span>}
+                {!veryShortNotice && shortNotice && <span className="text-warning">Short notice — timeline will be condensed</span>}
                 {!shortNotice && 'YYYY-MM-DD format'}
               </span>
               {fieldError('date') && (
@@ -236,11 +247,14 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
                 max={50000}
                 aria-required="true"
                 aria-invalid={!!fieldError('guestCount')}
+                aria-describedby={fieldError('guestCount') ? 'event-guests-error' : 'event-guests-hint'}
               />
-              {fieldError('guestCount') && (
-                <span className="form-error" role="alert">
+              {fieldError('guestCount') ? (
+                <span id="event-guests-error" className="form-error" role="alert">
                   <AlertTriangle size={12} aria-hidden="true" /> {fieldError('guestCount')}
                 </span>
+              ) : (
+                <span id="event-guests-hint" className="form-hint">Between 1 and 50,000 guests</span>
               )}
             </div>
 
@@ -270,10 +284,15 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
                 step={100}
                 aria-required="true"
                 aria-invalid={!!fieldError('budget')}
+                aria-describedby={fieldError('budget') ? 'event-budget-error' : 'event-budget-hint'}
               />
-              {fieldError('budget') && (
-                <span className="form-error" role="alert">
+              {fieldError('budget') ? (
+                <span id="event-budget-error" className="form-error" role="alert">
                   <AlertTriangle size={12} aria-hidden="true" /> {fieldError('budget')}
+                </span>
+              ) : (
+                <span id="event-budget-hint" className="form-hint">
+                  Total available funds in the selected currency
                 </span>
               )}
             </div>
@@ -354,6 +373,7 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
                   return (
                     <label
                       key={p}
+                      className="priority-chip"
                       style={{
                         display: 'inline-flex',
                         alignItems: 'center',
@@ -438,6 +458,17 @@ export function EventSetup({ onNavigate }: EventSetupProps) {
           Your data is stored only in this browser. See Settings for export and privacy info.
         </p>
       </form>
+
+      <ConfirmDialog
+        open={pendingTypeChange !== null}
+        title="Change the event type?"
+        description={`Changing the event type from ${existing?.type ?? 'the current type'} to ${pendingTypeChange?.type ?? 'a new type'} will regenerate pending timeline tasks and rescale budget allocations. Completed, in-progress, and user-edited tasks plus all vendor records will be preserved.`}
+        confirmLabel="Change event type"
+        onConfirm={() => {
+          if (pendingTypeChange) persistEvent(pendingTypeChange)
+        }}
+        onCancel={() => setPendingTypeChange(null)}
+      />
     </div>
   )
 }

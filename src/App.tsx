@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+﻿import { useEffect, useRef, useState } from 'react'
 import { AppProvider, useApp } from './context/AppContext'
 import { Sidebar } from './components/layout/Sidebar'
 import { Dashboard } from './components/pages/Dashboard'
@@ -16,16 +16,34 @@ function AppInner() {
   const { state } = useApp()
   const [page, setPage] = useState<Page>(state.event ? 'dashboard' : 'setup')
   const [sidebarOpen, setSidebarOpen] = useState(false)
+  const mainRef = useRef<HTMLElement>(null)
+  const firstRender = useRef(true)
 
   const navigate = (p: Page) => {
     setPage(p)
     setSidebarOpen(false)
   }
 
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setSidebarOpen(false)
+    }
+    window.addEventListener('keydown', onKeyDown)
+    return () => window.removeEventListener('keydown', onKeyDown)
+  }, [])
+
+  useEffect(() => {
+    if (firstRender.current) {
+      firstRender.current = false
+      return
+    }
+    mainRef.current?.focus()
+  }, [page])
+
   return (
     <div className="app-shell">
       {/* Skip-to-content link for keyboard users */}
-      <a href="#main-content" className="sr-only" style={{ position: 'fixed', top: 0, left: 0, zIndex: 999 }}>
+      <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
 
@@ -57,7 +75,7 @@ function AppInner() {
         hasEvent={!!state.event}
       />
 
-      <main className="main-content" id="main-content" tabIndex={-1}>
+      <main className="main-content" id="main-content" tabIndex={-1} ref={mainRef}>
         {page === 'dashboard' && <Dashboard onNavigate={navigate} />}
         {page === 'setup' && <EventSetup onNavigate={navigate} />}
         {page === 'budget' && <BudgetPlanner />}

@@ -1,5 +1,5 @@
 // ============================================================
-// EventWise AI — Event Validation Engine
+// EventWise AI  -  Event Validation Engine
 // Pure functions; no side effects; fully testable.
 // ============================================================
 
@@ -85,7 +85,7 @@ export function validateEventDetails(
     errors.push({ field: 'preference', message: 'Please select indoor, outdoor, or flexible.' });
   }
 
-  // Optional text fields — bounded to keep local storage and exports small.
+  // Optional text fields  -  bounded to keep local storage and exports small.
   if (data.city && data.city.length > 100) {
     errors.push({ field: 'city', message: 'City or venue must be 100 characters or fewer.' });
   }
@@ -136,12 +136,18 @@ export function isShortNotice(dateStr: string, thresholdDays = 30, today: Date =
  * HTML tags and control characters before data is persisted or exported, so
  * even non-React consumers cannot receive markup from these fields.
  */
+function removeControlCharacters(value: string): string {
+  return Array.from(value)
+    .filter((char) => {
+      const code = char.charCodeAt(0)
+      return code === 9 || code === 10 || code === 13 || (code >= 32 && code !== 127)
+    })
+    .join('')
+}
+
 export function sanitizeText(raw: string): string {
-  if (typeof raw !== 'string') return '';
-  return raw
-    .replace(/<[^>]*>/g, '')
-    .replace(/[\u0000-\u0008\u000B\u000C\u000E-\u001F\u007F]/g, '')
-    .trim();
+  if (typeof raw !== 'string') return ''
+  return removeControlCharacters(raw.replace(/<[^>]*>/g, '')).trim()
 }
 
 /** Validate a positive money input and return null when invalid. */

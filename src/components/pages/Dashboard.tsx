@@ -1,21 +1,18 @@
-import React from 'react'
 import { useApp } from '../../context/AppContext'
 import { formatCurrency } from '../../utils/currency'
 import { format, parseISO, differenceInDays } from 'date-fns'
 import {
-  AlertTriangle, CheckCircle, Clock, TrendingUp,
-  CalendarDays, Users, DollarSign, Star
+  AlertTriangle, CheckCircle, Clock, Users, DollarSign, Star, RefreshCw, X
 } from 'lucide-react'
 import type { Page } from '../../App'
-import { completionPercent } from '../../engine/timeline'
 
 interface DashboardProps {
   onNavigate: (page: Page) => void
 }
 
 export function Dashboard({ onNavigate }: DashboardProps) {
-  const { state, budgetSummary, readiness } = useApp()
-  const { event, tasks, vendors } = state
+  const { state, dispatch, budgetSummary, readiness } = useApp()
+  const { event, vendors } = state
 
   if (!event) {
     return (
@@ -35,7 +32,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
   const today = new Date()
   const eventDate = parseISO(event.date)
   const daysAway = differenceInDays(eventDate, today)
-  const pct = completionPercent(tasks)
+  const pct = readiness?.completionPercent ?? 0
   const bookedVendors = vendors.filter((v) => v.status === 'booked').length
 
   return (
@@ -46,7 +43,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
           <div>
             <h1>{event.name}</h1>
             <p style={{ marginTop: '4px', color: 'var(--color-warm-gray-600)', textTransform: 'capitalize' }}>
-              {event.type} · {event.city || 'Location TBC'} · {event.guestCount} guests
+              {event.type}  |  {event.city || 'Location TBC'}  |  {event.guestCount} guests
             </p>
           </div>
           <button className="btn btn-secondary" onClick={() => onNavigate('setup')}>
@@ -83,6 +80,48 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         </div>
       )}
 
+      {state.lastReplan && (
+        <div className="alert alert-info" role="status" aria-live="polite" style={{ marginBottom: '1.5rem' }}>
+          <RefreshCw size={16} aria-hidden="true" className="alert-icon" />
+          <div style={{ flex: 1 }}>
+            <strong>Event plan updated.</strong> The following details changed since the previous plan:
+            <ul style={{ marginTop: '0.25rem', paddingLeft: '1rem', fontSize: '0.85rem' }}>
+              {state.lastReplan.explanations.map((explanation) => (
+                <li key={explanation}>{explanation}</li>
+              ))}
+            </ul>
+            {state.lastReplan.tasksPreserved > 0 && (
+              <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                {state.lastReplan.tasksPreserved} completed or user-edited task(s) were preserved.
+                Vendors and expenses were not discarded.
+              </p>
+            )}
+            {state.lastReplan.tasksAdded > 0 && (
+              <p style={{ fontSize: '0.85rem', marginTop: '0.25rem' }}>
+                {state.lastReplan.tasksAdded} new task(s) were added to the timeline.
+              </p>
+            )}
+          </div>
+          <button
+            className="btn btn-ghost btn-sm"
+            onClick={() => dispatch({ type: 'CLEAR_REPLAN_NOTICE' })}
+            aria-label="Dismiss plan update notice"
+          >
+            <X size={14} aria-hidden="true" />
+          </button>
+        </div>
+      )}
+
+      {readiness && (readiness.overdueTasks.length > 0 || readiness.blockedTasks.length > 0) && (
+        <div className="alert alert-warning" role="alert" style={{ marginBottom: '1.5rem' }}>
+          <AlertTriangle size={16} aria-hidden="true" />
+          <span>
+            {readiness.overdueTasks.length > 0 && `${readiness.overdueTasks.length} task(s) are overdue. `}
+            {readiness.blockedTasks.length > 0 && `${readiness.blockedTasks.length} task(s) are blocked by unfinished dependencies.`}
+          </span>
+        </div>
+      )}
+
       {/* KPI stats */}
       <div className="stat-grid" style={{ marginBottom: '1.5rem' }}>
         <div className="stat-card accent">
@@ -110,10 +149,10 @@ export function Dashboard({ onNavigate }: DashboardProps) {
         <div className="stat-card">
           <p className="stat-label">Budget Used</p>
           <p className={`stat-value ${budgetSummary?.isOverBudget ? 'text-danger' : ''}`}>
-            {budgetSummary ? formatCurrency(budgetSummary.totalActual, event.currency) : '—'}
+            {budgetSummary ? formatCurrency(budgetSummary.totalActual, event.currency) : ' - '}
           </p>
           <p className="stat-sub">
-            of {budgetSummary ? formatCurrency(budgetSummary.totalBudget, event.currency) : '—'} total
+            of {budgetSummary ? formatCurrency(budgetSummary.totalBudget, event.currency) : ' - '} total
           </p>
         </div>
 
@@ -138,7 +177,7 @@ export function Dashboard({ onNavigate }: DashboardProps) {
             </button>
           </div>
           {readiness && readiness.upcomingDeadlines.length > 0 ? (
-            <ul role="list" style={{ listStyle: 'none' }}>
+            <ul style={{ listStyle: 'none' }}>
               {readiness.upcomingDeadlines.slice(0, 5).map((task) => {
                 const dueIn = differenceInDays(parseISO(task.dueDate), today)
                 return (

@@ -1,9 +1,9 @@
 // ============================================================
-// EventWise AI — Budget Planning Engine
+// EventWise AI  -  Budget Planning Engine
 // Pure, deterministic, no side effects, fully testable.
 // ============================================================
 
-import { EventType, BudgetCategory, BudgetPlan, BudgetSummary, Expense } from '../types';
+import { EventType, BudgetCategory, BudgetPlan, BudgetSummary, Expense, Currency } from '../types';
 import { nanoid } from '../utils/nanoid';
 
 // ----------------------------------------------------------------
@@ -71,6 +71,7 @@ const CATEGORY_LABELS: Record<keyof AllocationProfile, string> = {
   miscellaneous: 'Miscellaneous',
 };
 
+
 const CATEGORY_DESCRIPTIONS: Record<keyof AllocationProfile, string> = {
   venue: 'Rental, setup, breakdown, permits',
   catering: 'Food, beverages, service staff, tableware',
@@ -79,6 +80,7 @@ const CATEGORY_DESCRIPTIONS: Record<keyof AllocationProfile, string> = {
   entertainment: 'DJ, band, speakers, activities',
   logistics: 'Transport, parking, coordination fees',
   invitations: 'Design, printing, postage, digital tools',
+  attire: 'Clothing, fitting, hair, makeup, accessories',
   miscellaneous: 'Tips, unexpected costs, small purchases',
 };
 
@@ -180,7 +182,7 @@ export function calculateBudgetSummary(
   plan: BudgetPlan,
   totalBudget: number,
   guestCount: number,
-  currency: string
+  currency: Currency
 ): BudgetSummary {
   const safeBudget = sanitizeMoney(totalBudget);
   const totalPlanned = round2(plan.categories.reduce((s, c) => s + c.plannedAmount, 0));

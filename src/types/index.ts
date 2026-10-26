@@ -174,6 +174,8 @@ export interface ReplanDiff {
   affectedCategoryIds: string[];
   budgetChanged: boolean;
   explanations: string[];
+  tasksPreserved: number;
+  tasksAdded: number;
 }
 
 // ----------------------------------------------------------------

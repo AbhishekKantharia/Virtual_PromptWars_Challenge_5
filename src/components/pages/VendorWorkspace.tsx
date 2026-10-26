@@ -1,9 +1,11 @@
 import React, { useState, useMemo } from 'react'
 import { useApp } from '../../context/AppContext'
-import { Vendor, VendorStatus } from '../../types'
-import { VENDOR_CATEGORIES } from '../../engine/vendors'
+import { Vendor, VendorStatus, ValidationError } from '../../types'
+import { VENDOR_CATEGORIES, validateVendor, sortVendorsForComparison } from '../../engine/vendors'
 import { formatCurrency } from '../../utils/currency'
-import { Plus, Edit2, Trash2, AlertTriangle, ExternalLink } from 'lucide-react'
+import { sanitizeText } from '../../engine/validation'
+import { ConfirmDialog } from '../common/ConfirmDialog'
+import { Plus, Edit2, Trash2, AlertTriangle, ExternalLink, ArrowUpDown } from 'lucide-react'
 
 const STATUS_OPTIONS: { value: VendorStatus; label: string }[] = [
   { value: 'researching', label: 'Researching' },
@@ -33,6 +35,7 @@ const emptyVendor: Omit<Vendor, 'id' | 'createdAt' | 'isSampleData'> = {
   notes: '',
   cancellationTerms: '',
   accessibilityInfo: '',
+  reviewNotes: '',
 }
 
 export function VendorWorkspace() {
@@ -43,7 +46,9 @@ export function VendorWorkspace() {
   const [showForm, setShowForm] = useState(false)
   const [editingVendor, setEditingVendor] = useState<Vendor | null>(null)
   const [form, setForm] = useState<Omit<Vendor, 'id' | 'createdAt' | 'isSampleData'>>(emptyVendor)
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null)
+  const [formErrors, setFormErrors] = useState<ValidationError[]>([])
+  const [deleteTarget, setDeleteTarget] = useState<Vendor | null>(null)
+  const [showComparison, setShowComparison] = useState(false)
 
   const categories = useMemo(() => {
     const used = new Set(vendors.map((v) => v.category))
@@ -57,6 +62,8 @@ export function VendorWorkspace() {
       return true
     })
   }, [vendors, categoryFilter, statusFilter])
+
+  const comparison = useMemo(() => sortVendorsForComparison(vendors), [vendors])
 
   if (!event) {
     return (
@@ -84,17 +91,38 @@ export function VendorWorkspace() {
       notes: vendor.notes,
       cancellationTerms: vendor.cancellationTerms,
       accessibilityInfo: vendor.accessibilityInfo,
+      reviewNotes: vendor.reviewNotes ?? '',
     })
+    setFormErrors([])
     setShowForm(true)
+  }
+
+  function fieldError(field: string) {
+    return formErrors.find((error) => error.field === field)?.message
   }
 
   function submitForm(e: React.FormEvent) {
     e.preventDefault()
-    if (!form.name) return
+    const payload = {
+      ...form,
+      name: sanitizeText(form.name).slice(0, 120),
+      contactName: sanitizeText(form.contactName).slice(0, 80),
+      contactEmail: sanitizeText(form.contactEmail).slice(0, 150),
+      contactPhone: sanitizeText(form.contactPhone).slice(0, 30),
+      notes: sanitizeText(form.notes).slice(0, 500),
+      cancellationTerms: sanitizeText(form.cancellationTerms).slice(0, 300),
+      accessibilityInfo: sanitizeText(form.accessibilityInfo).slice(0, 300),
+      reviewNotes: sanitizeText(form.reviewNotes ?? '').slice(0, 500),
+    }
+
+    const result = validateVendor(payload)
+    setFormErrors(result.errors)
+    if (!result.valid) return
+
     if (editingVendor) {
-      dispatch({ type: 'EDIT_VENDOR', vendorId: editingVendor.id, patch: form })
+      dispatch({ type: 'EDIT_VENDOR', vendorId: editingVendor.id, patch: payload })
     } else {
-      dispatch({ type: 'ADD_VENDOR', payload: form })
+      dispatch({ type: 'ADD_VENDOR', payload })
     }
     resetForm()
   }
@@ -103,11 +131,12 @@ export function VendorWorkspace() {
     setShowForm(false)
     setEditingVendor(null)
     setForm(emptyVendor)
+    setFormErrors([])
   }
 
-  function handleDelete(id: string) {
-    dispatch({ type: 'DELETE_VENDOR', vendorId: id })
-    setConfirmDelete(null)
+  function handleDelete(vendor: Vendor) {
+    dispatch({ type: 'DELETE_VENDOR', vendorId: vendor.id })
+    setDeleteTarget(null)
   }
 
   const bookedTotal = vendors.filter(v => v.status === 'booked').reduce((s, v) => s + (v.quotedCost ?? v.estimatedCost), 0)
@@ -127,7 +156,7 @@ export function VendorWorkspace() {
       </div>
 
       {/* Filters */}
-      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem' }}>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '0.75rem' }}>
         {categories.map((cat) => (
           <button
             key={cat}
@@ -139,6 +168,82 @@ export function VendorWorkspace() {
           </button>
         ))}
       </div>
+      <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginBottom: '1.5rem', alignItems: 'center' }}>
+        {(['all', ...STATUS_OPTIONS.map((option) => option.value)] as const).map((status) => (
+          <button
+            key={status}
+            className={`btn btn-sm ${statusFilter === status ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={() => setStatusFilter(status)}
+            aria-pressed={statusFilter === status}
+          >
+            {status === 'all'
+              ? 'All Statuses'
+              : STATUS_OPTIONS.find((option) => option.value === status)?.label}
+          </button>
+        ))}
+        <button
+          className="btn btn-ghost btn-sm"
+          onClick={() => setShowComparison((shown) => !shown)}
+          aria-expanded={showComparison}
+          aria-controls="vendor-comparison"
+        >
+          <ArrowUpDown size={14} aria-hidden="true" />
+          {showComparison ? 'Hide comparison' : 'Compare vendors'}
+        </button>
+      </div>
+
+      {showComparison && (
+        <section id="vendor-comparison" className="card" style={{ marginBottom: '1.5rem' }} aria-labelledby="comparison-heading">
+          <div className="card-header">
+            <div>
+              <h2 id="comparison-heading" className="card-title">Vendor Comparison</h2>
+              <p className="card-subtitle">
+                Sorted by quoted or estimated cost plus booking progress. No ratings are invented.
+              </p>
+            </div>
+          </div>
+          {comparison.length === 0 ? (
+            <p className="text-sm text-muted">No active vendors to compare.</p>
+          ) : (
+            <div style={{ overflowX: 'auto' }}>
+              <table className="data-table" aria-label="Active vendor comparison">
+                <thead>
+                  <tr>
+                    <th scope="col">Vendor</th>
+                    <th scope="col">Category</th>
+                    <th scope="col">Status</th>
+                    <th scope="col">Estimate</th>
+                    <th scope="col">Quote</th>
+                    <th scope="col">Quote vs estimate</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {comparison.map((vendor) => {
+                    const effective = vendor.quotedCost ?? vendor.estimatedCost
+                    const difference =
+                      vendor.quotedCost === undefined ? null : vendor.quotedCost - vendor.estimatedCost
+                    return (
+                      <tr key={vendor.id}>
+                        <td>{vendor.name}{vendor.isSampleData ? ' (sample)' : ''}</td>
+                        <td>{vendor.category}</td>
+                        <td><span className={`badge ${STATUS_BADGE[vendor.status]}`}>{vendor.status}</span></td>
+                        <td>{formatCurrency(vendor.estimatedCost, event.currency)}</td>
+                        <td>{vendor.quotedCost !== undefined ? formatCurrency(vendor.quotedCost, event.currency) : 'No quote'}</td>
+                        <td>
+                          {difference === null
+                            ? '—'
+                            : `${difference === 0 ? 'Same' : difference < 0 ? 'Lower by ' : 'Higher by '}${formatCurrency(Math.abs(difference), event.currency)}`}
+                          {vendor.quotedCost === undefined && effective > 0 ? ' (estimate used)' : ''}
+                        </td>
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
 
       {/* Add/Edit form */}
       {showForm && (
@@ -152,19 +257,34 @@ export function VendorWorkspace() {
               <span>This is a sample vendor. Replace with your real vendor details.</span>
             </div>
           )}
-          <form onSubmit={submitForm} aria-label={editingVendor ? 'Edit vendor form' : 'Add vendor form'}>
+          <form onSubmit={submitForm} aria-label={editingVendor ? 'Edit vendor form' : 'Add vendor form'} noValidate>
+            {formErrors.length > 0 && (
+              <div className="alert alert-danger" role="alert" style={{ marginBottom: '1rem' }}>
+                <AlertTriangle size={14} aria-hidden="true" />
+                <ul style={{ margin: 0, paddingLeft: '1rem' }}>
+                  {formErrors.map((error) => (
+                    <li key={error.field}>{error.message}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label required" htmlFor="vendor-name">Vendor Name</label>
                 <input
                   id="vendor-name"
                   type="text"
-                  className="form-input"
+                  className={`form-input${fieldError('name') ? ' error' : ''}`}
                   value={form.name}
                   onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
                   required
                   maxLength={120}
+                  aria-invalid={!!fieldError('name')}
+                  aria-describedby={fieldError('name') ? 'vendor-name-error' : undefined}
                 />
+                {fieldError('name') && (
+                  <span id="vendor-name-error" className="form-error">{fieldError('name')}</span>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label required" htmlFor="vendor-category">Category</label>
@@ -233,11 +353,16 @@ export function VendorWorkspace() {
                 <input
                   id="vendor-contact-email"
                   type="email"
-                  className="form-input"
+                  className={`form-input${fieldError('contactEmail') ? ' error' : ''}`}
                   value={form.contactEmail}
                   onChange={(e) => setForm((f) => ({ ...f, contactEmail: e.target.value }))}
                   maxLength={150}
+                  aria-invalid={!!fieldError('contactEmail')}
+                  aria-describedby={fieldError('contactEmail') ? 'vendor-email-error' : undefined}
                 />
+                {fieldError('contactEmail') && (
+                  <span id="vendor-email-error" className="form-error">{fieldError('contactEmail')}</span>
+                )}
               </div>
               <div className="form-group">
                 <label className="form-label" htmlFor="vendor-contact-phone">Contact Phone</label>
@@ -285,6 +410,22 @@ export function VendorWorkspace() {
                   rows={2}
                 />
               </div>
+              <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+                <label className="form-label" htmlFor="vendor-review">Your Review Notes</label>
+                <textarea
+                  id="vendor-review"
+                  className="form-textarea"
+                  value={form.reviewNotes ?? ''}
+                  onChange={(e) => setForm((f) => ({ ...f, reviewNotes: e.target.value }))}
+                  maxLength={500}
+                  rows={2}
+                  placeholder="What you verified yourself — never presented as a verified public rating"
+                  aria-describedby="vendor-review-hint"
+                />
+                <span id="vendor-review-hint" className="form-hint">
+                  Private notes only. EventWise does not generate or verify vendor ratings.
+                </span>
+              </div>
             </div>
             <div style={{ display: 'flex', gap: '0.5rem', marginTop: '1rem' }}>
               <button type="submit" className="btn btn-primary btn-sm">{editingVendor ? 'Save' : 'Add Vendor'}</button>
@@ -310,7 +451,11 @@ export function VendorWorkspace() {
                   <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', marginTop: '4px' }}>
                     <span className="badge badge-gray">{vendor.category}</span>
                     <span className={`badge ${STATUS_BADGE[vendor.status]}`}>{vendor.status}</span>
-                    {vendor.isSampleData && <span className="sample-label" title="This is sample demonstration data">⚠ Sample</span>}
+                    {vendor.isSampleData && (
+                      <span className="sample-label" title="This is sample demonstration data">
+                        Sample data
+                      </span>
+                    )}
                   </div>
                 </div>
                 <div style={{ display: 'flex', gap: '0.25rem' }}>
@@ -323,7 +468,7 @@ export function VendorWorkspace() {
                   </button>
                   <button
                     className="btn btn-ghost btn-icon btn-sm"
-                    onClick={() => setConfirmDelete(vendor.id)}
+                    onClick={() => setDeleteTarget(vendor)}
                     aria-label={`Delete vendor: ${vendor.name}`}
                   >
                     <Trash2 size={13} aria-hidden="true" />
@@ -361,7 +506,7 @@ export function VendorWorkspace() {
               {/* Accessibility */}
               {vendor.accessibilityInfo && (
                 <p className="text-xs" style={{ marginTop: '0.5rem', color: 'var(--color-navy-500)' }}>
-                  ♿ {vendor.accessibilityInfo}
+                  <strong>Accessibility:</strong> {vendor.accessibilityInfo}
                 </p>
               )}
 
@@ -372,20 +517,30 @@ export function VendorWorkspace() {
                 </p>
               )}
 
-              {/* Confirm delete dialog */}
-              {confirmDelete === vendor.id && (
-                <div role="alertdialog" aria-modal="true" aria-labelledby="confirm-delete-label" style={{ marginTop: '0.75rem', padding: '0.75rem', background: 'var(--color-danger-bg)', borderRadius: '6px', border: '1px solid #fca5a5' }}>
-                  <p id="confirm-delete-label" className="text-sm font-medium text-danger">Remove this vendor?</p>
-                  <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-                    <button className="btn btn-danger btn-sm" onClick={() => handleDelete(vendor.id)}>Remove</button>
-                    <button className="btn btn-ghost btn-sm" onClick={() => setConfirmDelete(null)}>Cancel</button>
-                  </div>
-                </div>
+              {vendor.reviewNotes && (
+                <p className="text-xs" style={{ marginTop: '0.5rem' }}>
+                  <strong>Your review notes:</strong> {vendor.reviewNotes}
+                </p>
               )}
             </article>
           ))}
         </div>
       )}
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete this vendor?"
+        description={
+          deleteTarget
+            ? `This permanently removes "${deleteTarget.name}" and its contact, cost, and review notes from your workspace. Booked costs will no longer count toward committed spend.`
+            : ''
+        }
+        confirmLabel="Delete vendor"
+        onConfirm={() => {
+          if (deleteTarget) handleDelete(deleteTarget)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

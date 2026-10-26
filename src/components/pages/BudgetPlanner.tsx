@@ -1,15 +1,10 @@
 import React, { useState } from 'react'
 import { useApp } from '../../context/AppContext'
 import { formatCurrency } from '../../utils/currency'
-import { PieChart, Pie, Cell, Tooltip, Legend, ResponsiveContainer } from 'recharts'
 import { Plus, Edit2, Trash2, AlertTriangle, Info } from 'lucide-react'
 import { BudgetCategory, Expense } from '../../types'
-import { nanoid } from '../../utils/nanoid'
-
-const PIE_COLORS = [
-  '#8b5fb8', '#6b4a96', '#a87fd4', '#3d5fa0', '#1e3a6e',
-  '#2e7d52', '#b45309', '#b91c1c', '#64748b',
-]
+import { sanitizeText, parseMoney } from '../../engine/validation'
+import { ConfirmDialog } from '../common/ConfirmDialog'
 
 export function BudgetPlanner() {
   const { state, dispatch, budgetSummary } = useApp()
@@ -26,7 +21,8 @@ export function BudgetPlanner() {
     notes: '',
   })
   const [editingExpense, setEditingExpense] = useState<Expense | null>(null)
-  const [contingency, setContingency] = useState(budget?.contingencyPercent ?? 10)
+  const [expenseError, setExpenseError] = useState('')
+  const [deleteTarget, setDeleteTarget] = useState<Expense | null>(null)
 
   if (!event || !budget) {
     return (
@@ -40,23 +36,34 @@ export function BudgetPlanner() {
     )
   }
 
-  const pieData = budget.categories.map((cat) => ({
-    name: cat.name,
-    value: cat.plannedAmount,
-  }))
-
   function saveCategory(catId: string) {
-    const amount = parseFloat(editAmount)
-    if (!isNaN(amount)) {
-      dispatch({ type: 'UPDATE_CATEGORY_AMOUNT', categoryId: catId, amount })
+    const amount = parseMoney(editAmount)
+    if (amount === null) {
+      setEditingCategory(null)
+      return
     }
+    dispatch({ type: 'UPDATE_CATEGORY_AMOUNT', categoryId: catId, amount })
     setEditingCategory(null)
   }
 
   function submitExpense(e: React.FormEvent) {
     e.preventDefault()
-    const amount = parseFloat(expenseForm.amount)
-    if (!expenseForm.label || isNaN(amount) || !expenseForm.categoryId) return
+    const amount = parseMoney(expenseForm.amount)
+    const label = sanitizeText(expenseForm.label).slice(0, 120)
+    const notes = sanitizeText(expenseForm.notes).slice(0, 200)
+
+    if (!expenseForm.categoryId) {
+      setExpenseError('Choose a budget category before saving this expense.')
+      return
+    }
+    if (label.length < 2) {
+      setExpenseError('Enter a description of at least 2 characters.')
+      return
+    }
+    if (amount === null || amount <= 0) {
+      setExpenseError('Enter an amount greater than zero.')
+      return
+    }
 
     if (editingExpense) {
       dispatch({
@@ -64,10 +71,10 @@ export function BudgetPlanner() {
         expenseId: editingExpense.id,
         patch: {
           categoryId: expenseForm.categoryId,
-          label: expenseForm.label,
+          label,
           amount,
           isQuoted: expenseForm.isQuoted,
-          notes: expenseForm.notes,
+          notes,
         },
       })
     } else {
@@ -75,13 +82,14 @@ export function BudgetPlanner() {
         type: 'ADD_EXPENSE',
         payload: {
           categoryId: expenseForm.categoryId,
-          label: expenseForm.label,
+          label,
           amount,
           isQuoted: expenseForm.isQuoted,
-          notes: expenseForm.notes,
+          notes,
         },
       })
     }
+    setExpenseError('')
     resetExpenseForm()
   }
 
@@ -89,6 +97,7 @@ export function BudgetPlanner() {
     setExpenseForm({ categoryId: '', label: '', amount: '', isQuoted: false, notes: '' })
     setShowExpenseForm(false)
     setEditingExpense(null)
+    setExpenseError('')
   }
 
   function startEditExpense(expense: Expense) {
@@ -144,9 +153,12 @@ export function BudgetPlanner() {
               </p>
             </div>
             <div className="stat-card">
-              <p className="stat-label">Cost Per Guest</p>
+              <p className="stat-label">Actual Cost Per Guest</p>
               <p className="stat-value">{formatCurrency(budgetSummary.costPerGuest, event.currency)}</p>
-              <p className="stat-sub">Based on {event.guestCount} guests</p>
+              <p className="stat-sub">
+                Planned {formatCurrency(budgetSummary.plannedCostPerGuest, event.currency)} ·{' '}
+                {event.guestCount} guests
+              </p>
             </div>
             <div className="stat-card">
               <p className="stat-label">Contingency ({budget.contingencyPercent}%)</p>
@@ -191,67 +203,64 @@ export function BudgetPlanner() {
 
           {/* Contingency */}
           <div style={{ marginTop: '1rem', paddingTop: '1rem', borderTop: '1px solid var(--color-warm-gray-100)' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
               <label htmlFor="contingency-input" className="text-sm font-medium">
-                Contingency Reserve ({contingency}%)
+                Contingency Reserve ({budget.contingencyPercent}%)
               </label>
               <input
                 id="contingency-input"
                 type="range"
                 min={0}
                 max={30}
-                value={contingency}
-                onChange={(e) => setContingency(Number(e.target.value))}
-                onMouseUp={() => {
-                  const updated = { ...budget, contingencyPercent: contingency, contingencyAmount: event.budget * (contingency / 100) }
-                  dispatch({ type: 'SET_BUDGET_PLAN', payload: updated })
-                }}
+                step={1}
+                value={budget.contingencyPercent}
+                onChange={(e) =>
+                  dispatch({ type: 'SET_CONTINGENCY', percent: Number(e.target.value) })
+                }
                 style={{ flex: 1 }}
-                aria-label={`Contingency reserve: ${contingency}%`}
+                aria-describedby="contingency-help"
               />
             </div>
-            <p className="text-xs text-muted" style={{ marginTop: '4px' }}>
-              Reserve: {budgetSummary ? formatCurrency(budgetSummary.contingencyAmount, event.currency) : '—'} (10% default is industry-recommended)
+            <p id="contingency-help" className="text-xs text-muted" style={{ marginTop: '4px' }}>
+              Reserve: {budgetSummary ? formatCurrency(budgetSummary.contingencyAmount, event.currency) : '—'}.
+              Changing the reserve rescales planned category amounts so planned plus reserve stays
+              within your total budget. 10% is the default starting point.
             </p>
           </div>
         </div>
 
-        {/* Chart */}
+        {/* Accessible allocation chart */}
         <div className="card">
-          <h2 className="card-title" style={{ marginBottom: '1rem' }}>Allocation Breakdown</h2>
-          <div className="chart-wrapper" aria-hidden="true">
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={pieData}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={60}
-                  outerRadius={100}
-                  paddingAngle={3}
-                  dataKey="value"
-                >
-                  {pieData.map((_, index) => (
-                    <Cell key={`cell-${index}`} fill={PIE_COLORS[index % PIE_COLORS.length]} />
-                  ))}
-                </Pie>
-                <Tooltip formatter={(value: number) => formatCurrency(value, event.currency)} />
-                <Legend wrapperStyle={{ fontSize: '11px' }} />
-              </PieChart>
-            </ResponsiveContainer>
-          </div>
-          {/* Text alternative for chart */}
-          <div className="chart-text-alt">
-            <p className="font-medium text-sm">Budget allocation summary:</p>
-            <ul style={{ listStyle: 'none', marginTop: '4px' }}>
-              {budget.categories.map((cat) => (
-                <li key={cat.id} className="text-xs" style={{ display: 'flex', justifyContent: 'space-between' }}>
-                  <span>{cat.name}</span>
-                  <span>{formatCurrency(cat.plannedAmount, event.currency)}</span>
-                </li>
-              ))}
+          <h2 className="card-title" style={{ marginBottom: '0.25rem' }}>Allocation Breakdown</h2>
+          <p className="card-subtitle" style={{ marginBottom: '1rem' }}>
+            Share of planned categories. Values are visible as text, not colour alone.
+          </p>
+          {budgetSummary && budgetSummary.totalPlanned > 0 ? (
+            <ul className="allocation-chart" aria-label="Planned budget allocation by category">
+              {budget.categories.map((cat) => {
+                const percentage = (cat.plannedAmount / budgetSummary.totalPlanned) * 100
+                return (
+                  <li key={cat.id} className="allocation-row">
+                    <span className="allocation-label">{cat.name}</span>
+                    <span className="allocation-track" aria-hidden="true">
+                      <span
+                        className="allocation-fill"
+                        style={{ width: `${Math.max(0, Math.min(100, percentage))}%` }}
+                      />
+                    </span>
+                    <span className="allocation-value">
+                      {formatCurrency(cat.plannedAmount, event.currency)} ({percentage.toFixed(0)}%)
+                    </span>
+                  </li>
+                )
+              })}
             </ul>
-          </div>
+          ) : (
+            <p className="text-sm text-muted">Set category allocations to see the breakdown.</p>
+          )}
+          <p className="text-xs text-muted" style={{ marginTop: '1rem' }}>
+            Illustrative allocations only. Confirm real prices with vendors.
+          </p>
         </div>
       </div>
 
@@ -271,7 +280,18 @@ export function BudgetPlanner() {
         </div>
 
         {showExpenseForm && (
-          <form onSubmit={submitExpense} style={{ background: 'var(--color-warm-gray-100)', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }} aria-label="Add expense form">
+          <form
+            onSubmit={submitExpense}
+            style={{ background: 'var(--color-warm-gray-100)', padding: '1rem', borderRadius: '8px', marginBottom: '1rem' }}
+            aria-label={editingExpense ? 'Edit expense form' : 'Add expense form'}
+            noValidate
+          >
+            {expenseError && (
+              <div className="alert alert-danger" role="alert" style={{ marginBottom: '1rem' }}>
+                <AlertTriangle size={14} aria-hidden="true" />
+                <span>{expenseError}</span>
+              </div>
+            )}
             <div className="form-grid">
               <div className="form-group">
                 <label className="form-label required" htmlFor="expense-category">Category</label>
@@ -381,7 +401,7 @@ export function BudgetPlanner() {
                           </button>
                           <button
                             className="btn btn-ghost btn-icon btn-sm"
-                            onClick={() => dispatch({ type: 'DELETE_EXPENSE', expenseId: expense.id })}
+                            onClick={() => setDeleteTarget(expense)}
                             aria-label={`Delete expense: ${expense.label}`}
                           >
                             <Trash2 size={13} aria-hidden="true" />
@@ -401,6 +421,24 @@ export function BudgetPlanner() {
           <span>All cost estimates are illustrative and should be verified with actual vendors. EventWise AI does not verify vendor pricing.</span>
         </div>
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title="Delete this expense?"
+        description={
+          deleteTarget
+            ? `This removes "${deleteTarget.label}" (${formatCurrency(deleteTarget.amount, event.currency)}) from the budget. Category actual totals will be recalculated. This cannot be undone.`
+            : ''
+        }
+        confirmLabel="Delete expense"
+        onConfirm={() => {
+          if (deleteTarget) {
+            dispatch({ type: 'DELETE_EXPENSE', expenseId: deleteTarget.id })
+          }
+          setDeleteTarget(null)
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   )
 }

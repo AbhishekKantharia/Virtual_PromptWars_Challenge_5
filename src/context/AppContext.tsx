@@ -1,13 +1,44 @@
 // ============================================================
-// EventWise AI — App Context (State Management)
+// EventWise AI  -  App Context (State Management)
 // Central store using React Context + useReducer.
 // ============================================================
 
-import React, { createContext, useContext, useReducer, useEffect, useCallback } from 'react';
-import { AppState, EventDetails, Task, Vendor, BudgetPlan, Expense, Recommendation } from '../types';
+import React, {
+  createContext,
+  useContext,
+  useReducer,
+  useEffect,
+  useCallback,
+  useMemo,
+} from 'react';
+import {
+  AppState,
+  EventDetails,
+  Task,
+  Vendor,
+  BudgetPlan,
+  Expense,
+  Recommendation,
+} from '../types';
 import { loadState, saveState, emptyState } from '../data/persistence';
-import { createBudgetPlan, recalculateActuals, addExpense, editExpense as _editExpense, deleteExpense as _deleteExpense, updateCategoryAmount, calculateBudgetSummary } from '../engine/budget';
-import { generateTimeline, completeTask, reopenTask, addTask, editTask, deleteTask } from '../engine/timeline';
+import {
+  createBudgetPlan,
+  recalculateActuals,
+  addExpense,
+  editExpense as editExpenseRecord,
+  deleteExpense as deleteExpenseRecord,
+  updateCategoryAmount,
+  setContingencyPercent,
+  calculateBudgetSummary,
+} from '../engine/budget';
+import {
+  generateTimeline,
+  completeTask,
+  reopenTask,
+  addTask,
+  editTask,
+  deleteTask,
+} from '../engine/timeline';
 import { addVendor, editVendor, deleteVendor, getSampleVendors } from '../engine/vendors';
 import { generateRecommendations } from '../engine/recommendations';
 import { computeReplanDiff, applyReplan } from '../engine/replanning';
@@ -16,15 +47,14 @@ import { computeReadiness } from '../engine/readiness';
 // ----------------------------------------------------------------
 // Actions
 // ----------------------------------------------------------------
-type Action =
+export type Action =
   | { type: 'CREATE_EVENT'; payload: EventDetails }
   | { type: 'UPDATE_EVENT'; payload: Partial<EventDetails> }
-  | { type: 'SET_BUDGET_PLAN'; payload: BudgetPlan }
   | { type: 'UPDATE_CATEGORY_AMOUNT'; categoryId: string; amount: number }
+  | { type: 'SET_CONTINGENCY'; percent: number }
   | { type: 'ADD_EXPENSE'; payload: Omit<Expense, 'id' | 'createdAt'> }
   | { type: 'EDIT_EXPENSE'; expenseId: string; patch: Partial<Expense> }
   | { type: 'DELETE_EXPENSE'; expenseId: string }
-  | { type: 'SET_TASKS'; payload: Task[] }
   | { type: 'COMPLETE_TASK'; taskId: string }
   | { type: 'REOPEN_TASK'; taskId: string }
   | { type: 'ADD_TASK'; payload: Omit<Task, 'id' | 'isGenerated'> }
@@ -34,70 +64,95 @@ type Action =
   | { type: 'EDIT_VENDOR'; vendorId: string; patch: Partial<Vendor> }
   | { type: 'DELETE_VENDOR'; vendorId: string }
   | { type: 'SET_RECOMMENDATIONS'; payload: Recommendation[] }
-  | { type: 'LOAD_STATE'; payload: AppState }
+  | { type: 'CLEAR_REPLAN_NOTICE' }
   | { type: 'RESET' };
 
 // ----------------------------------------------------------------
 // Reducer
 // ----------------------------------------------------------------
-function reducer(state: AppState, action: Action): AppState {
+export function appReducer(state: AppState, action: Action): AppState {
   switch (action.type) {
     case 'CREATE_EVENT': {
       const event = action.payload;
-      const budget = createBudgetPlan(event.budget, event.type);
-      const tasks = generateTimeline(event.type, event.date);
+      const budget = createBudgetPlan(
+        event.budget,
+        event.type,
+        10,
+        event.priorities
+      );
+      const tasks = generateTimeline(event.type, event.date, new Date(), event.guestCount);
       const vendors = getSampleVendors();
-      const budgetSummary = calculateBudgetSummary(budget, event.budget, event.guestCount, event.currency);
-      const recommendations = generateRecommendations(event, budgetSummary);
-      return { ...state, event, budget, tasks, vendors, recommendations };
+      return withDerived({ ...state, lastReplan: null }, event, budget, tasks, vendors);
     }
 
     case 'UPDATE_EVENT': {
-      if (!state.event || !state.budget) return state;
+      if (!state.event) return state;
       const previous = state.event;
-      const next: EventDetails = { ...previous, ...action.payload, updatedAt: new Date().toISOString() };
+      const next: EventDetails = {
+        ...previous,
+        ...action.payload,
+        updatedAt: new Date().toISOString(),
+      };
       const diff = computeReplanDiff(previous, next);
+      const currentBudget =
+        state.budget ??
+        createBudgetPlan(next.budget, next.type, 10, next.priorities);
 
-      let { budget, tasks } = state;
+      let budget = currentBudget;
+      let tasks = state.tasks;
+      let lastReplan: typeof diff | null = null;
       if (diff.changedFields.length > 0) {
-        const result = applyReplan(previous, next, budget, tasks);
+        const existingIds = new Set(state.tasks.map((task) => task.id));
+        const result = applyReplan(previous, next, currentBudget, tasks);
         budget = result.plan;
         tasks = result.tasks;
+        lastReplan = {
+          ...diff,
+          tasksPreserved: result.tasks.filter(
+            (task) =>
+              existingIds.has(task.id) &&
+              (task.status === 'complete' ||
+                task.status === 'in_progress' ||
+                Boolean(task.isUserEdited) ||
+                !task.isGenerated)
+          ).length,
+          tasksAdded: result.tasks.filter((task) => !existingIds.has(task.id)).length,
+        };
       }
 
-      const updatedBudget = recalculateActuals(budget);
-      const budgetSummary = calculateBudgetSummary(updatedBudget, next.budget, next.guestCount, next.currency);
-      const recommendations = generateRecommendations(next, budgetSummary);
-
-      return { ...state, event: next, budget: updatedBudget, tasks, recommendations };
+      const updated = withDerived(state, next, budget, tasks, state.vendors);
+      return { ...updated, lastReplan };
     }
 
-    case 'SET_BUDGET_PLAN':
-      return { ...state, budget: action.payload };
-
     case 'UPDATE_CATEGORY_AMOUNT': {
-      if (!state.budget) return state;
+      if (!state.event || !state.budget) return state;
       const budget = updateCategoryAmount(state.budget, action.categoryId, action.amount);
-      return { ...state, budget };
+      return withDerived(state, state.event, budget, state.tasks, state.vendors);
+    }
+
+    case 'SET_CONTINGENCY': {
+      if (!state.event || !state.budget) return state;
+      const budget = setContingencyPercent(state.budget, state.event.budget, action.percent);
+      return withDerived(state, state.event, budget, state.tasks, state.vendors);
     }
 
     case 'ADD_EXPENSE': {
-      if (!state.budget) return state;
-      return { ...state, budget: addExpense(state.budget, action.payload) };
+      if (!state.event || !state.budget) return state;
+      const budget = addExpense(state.budget, action.payload);
+      return withDerived(state, state.event, budget, state.tasks, state.vendors);
     }
 
     case 'EDIT_EXPENSE': {
-      if (!state.budget) return state;
-      return { ...state, budget: _editExpense(state.budget, action.expenseId, action.patch) };
+      if (!state.event || !state.budget) return state;
+      const budget = editExpenseRecord(state.budget, action.expenseId, action.patch);
+      return withDerived(state, state.event, budget, state.tasks, state.vendors);
     }
 
     case 'DELETE_EXPENSE': {
-      if (!state.budget) return state;
-      return { ...state, budget: _deleteExpense(state.budget, action.expenseId) };
+      if (!state.event || !state.budget) return state;
+      const budget = deleteExpenseRecord(state.budget, action.expenseId);
+      return withDerived(state, state.event, budget, state.tasks, state.vendors);
     }
-
-    case 'SET_TASKS':
-      return { ...state, tasks: action.payload };
 
     case 'COMPLETE_TASK':
       return { ...state, tasks: completeTask(state.tasks, action.taskId) };
@@ -108,8 +163,21 @@ function reducer(state: AppState, action: Action): AppState {
     case 'ADD_TASK':
       return { ...state, tasks: addTask(state.tasks, action.payload) };
 
-    case 'EDIT_TASK':
-      return { ...state, tasks: editTask(state.tasks, action.taskId, action.patch) };
+    case 'EDIT_TASK': {
+      const target = state.tasks.find((task) => task.id === action.taskId);
+      if (!target) return state;
+      const patch: Partial<Task> = {
+        ...action.patch,
+        isUserEdited: target.isGenerated ? true : target.isUserEdited,
+      };
+      delete patch.id;
+      if (action.patch.status === 'complete') {
+        patch.completedAt = new Date().toISOString();
+      } else if (action.patch.status) {
+        patch.completedAt = undefined;
+      }
+      return { ...state, tasks: editTask(state.tasks, action.taskId, patch) };
+    }
 
     case 'DELETE_TASK':
       return { ...state, tasks: deleteTask(state.tasks, action.taskId) };
@@ -126,8 +194,8 @@ function reducer(state: AppState, action: Action): AppState {
     case 'SET_RECOMMENDATIONS':
       return { ...state, recommendations: action.payload };
 
-    case 'LOAD_STATE':
-      return action.payload;
+    case 'CLEAR_REPLAN_NOTICE':
+      return { ...state, lastReplan: null };
 
     case 'RESET':
       return emptyState();
@@ -135,6 +203,53 @@ function reducer(state: AppState, action: Action): AppState {
     default:
       return state;
   }
+}
+
+/**
+ * Recalculate actuals, the summary, and recommendations whenever an input that
+ * affects them changes. Vendors and task completion are passed through.
+ */
+function withDerived(
+  state: AppState,
+  event: EventDetails,
+  budget: BudgetPlan,
+  tasks: Task[],
+  vendors: Vendor[]
+): AppState {
+  const recalculated = recalculateActuals(budget);
+  const summary = calculateBudgetSummary(
+    recalculated,
+    event.budget,
+    event.guestCount,
+    event.currency
+  );
+  return {
+    ...state,
+    event,
+    budget: recalculated,
+    tasks,
+    vendors,
+    recommendations: generateRecommendations(event, summary),
+  };
+}
+
+/** Recover a usable state if a stored event somehow has no budget. */
+function hydrateState(): AppState {
+  const loaded = loadState();
+  if (!loaded) return emptyState();
+  if (!loaded.event || loaded.budget) return loaded;
+
+  const budget = createBudgetPlan(
+    loaded.event.budget,
+    loaded.event.type,
+    10,
+    loaded.event.priorities
+  );
+  const tasks =
+    loaded.tasks.length > 0
+      ? loaded.tasks
+      : generateTimeline(loaded.event.type, loaded.event.date, new Date(), loaded.event.guestCount);
+  return withDerived(loaded, loaded.event, budget, tasks, loaded.vendors);
 }
 
 // ----------------------------------------------------------------
@@ -151,33 +266,45 @@ interface AppContextValue {
 const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
-  const [state, dispatch] = useReducer(reducer, emptyState(), () => {
-    const loaded = loadState();
-    return loaded ?? emptyState();
-  });
+  const [state, dispatch] = useReducer(appReducer, undefined, hydrateState);
 
-  // Persist on every state change
   useEffect(() => {
     saveState(state);
   }, [state]);
 
-  // Derived values
-  const budgetSummary = state.event && state.budget
-    ? calculateBudgetSummary(state.budget, state.event.budget, state.event.guestCount, state.event.currency)
-    : null;
+  const budgetSummary = useMemo(
+    () =>
+      state.event && state.budget
+        ? calculateBudgetSummary(
+            state.budget,
+            state.event.budget,
+            state.event.guestCount,
+            state.event.currency
+          )
+        : null,
+    [state.event, state.budget]
+  );
 
-  const readiness = state.event && state.budget && budgetSummary
-    ? computeReadiness(state.event, state.tasks, state.budget, budgetSummary)
-    : null;
+  const readiness = useMemo(
+    () =>
+      state.event && budgetSummary
+        ? computeReadiness(state.event, state.tasks, budgetSummary)
+        : null,
+    [state.event, state.tasks, budgetSummary]
+  );
 
   const refreshRecommendations = useCallback(() => {
     if (!state.event || !budgetSummary) return;
-    const recs = generateRecommendations(state.event, budgetSummary);
-    dispatch({ type: 'SET_RECOMMENDATIONS', payload: recs });
+    dispatch({
+      type: 'SET_RECOMMENDATIONS',
+      payload: generateRecommendations(state.event, budgetSummary),
+    });
   }, [state.event, budgetSummary]);
 
   return (
-    <AppContext.Provider value={{ state, dispatch, budgetSummary, readiness, refreshRecommendations }}>
+    <AppContext.Provider
+      value={{ state, dispatch, budgetSummary, readiness, refreshRecommendations }}
+    >
       {children}
     </AppContext.Provider>
   );

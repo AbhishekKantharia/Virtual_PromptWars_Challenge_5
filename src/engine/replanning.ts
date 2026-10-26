@@ -22,6 +22,12 @@ export function computeReplanDiff(previous: EventDetails, next: EventDetails): R
       `Budget changed from ${previous.currency} ${previous.budget.toLocaleString()} to ${next.currency} ${next.budget.toLocaleString()}. Category allocations were scaled proportionally and expense records were preserved.`
     );
   }
+  if (previous.currency !== next.currency) {
+    changedFields.push('currency');
+    explanations.push(
+      `Currency changed from ${previous.currency} to ${next.currency}. Existing amounts were not converted; review expenses and vendor costs in the new currency.`
+    );
+  }
   if (previous.guestCount !== next.guestCount) {
     changedFields.push('guestCount');
     explanations.push(
@@ -90,6 +96,8 @@ export function computeReplanDiff(previous: EventDetails, next: EventDetails): R
     affectedCategoryIds,
     budgetChanged: changedFields.includes('budget'),
     explanations,
+    tasksPreserved: 0,
+    tasksAdded: 0,
   };
 }
 

@@ -136,7 +136,10 @@ export function filterVendors(vendors: Vendor[], category?: string, status?: Ven
   });
 }
 
-/** Comparison score: lower = better value. Combines quoted cost and status weight. */
+/**
+ * Comparison score: lower = better value. Combines quoted cost and booking
+ * progress. Deliberately does not invent ratings or endorsements.
+ */
 export function vendorComparisonScore(vendor: Vendor): number {
   const cost = vendor.quotedCost ?? vendor.estimatedCost;
   const statusWeights: Record<VendorStatus, number> = {
@@ -147,6 +150,14 @@ export function vendorComparisonScore(vendor: Vendor): number {
     cancelled: 999,
   };
   return cost + statusWeights[vendor.status] * 100;
+}
+
+/** Sort non-cancelled vendors by the transparent comparison score. */
+export function sortVendorsForComparison(vendors: Vendor[]): Vendor[] {
+  return vendors
+    .filter((vendor) => vendor.status !== 'cancelled')
+    .slice()
+    .sort((a, b) => vendorComparisonScore(a) - vendorComparisonScore(b));
 }
 
 /** Return sample vendor data for demo mode. All items are clearly labelled isSampleData: true. */
@@ -166,6 +177,7 @@ export function getSampleVendors(): Vendor[] {
       notes: 'Capacity 200. Has accessible ramp. ADA compliant bathrooms.',
       cancellationTerms: '30-day notice for full refund (sample terms)',
       accessibilityInfo: 'Wheelchair accessible, hearing loop available',
+      reviewNotes: 'Sample review: clear accessibility documentation provided with the quote.',
       isSampleData: true,
       createdAt: now,
     },
@@ -181,6 +193,7 @@ export function getSampleVendors(): Vendor[] {
       notes: 'Offers vegan, gluten-free, and nut-free options. Not a real vendor.',
       cancellationTerms: '14-day notice for 50% refund (sample terms)',
       accessibilityInfo: 'Staff trained in allergy awareness',
+      reviewNotes: 'Sample review: asked detailed allergy questions before quoting.',
       isSampleData: true,
       createdAt: now,
     },
@@ -197,6 +210,7 @@ export function getSampleVendors(): Vendor[] {
       notes: 'Package includes 8 hours coverage + edited album. Not a real vendor.',
       cancellationTerms: '60-day notice for 75% refund (sample terms)',
       accessibilityInfo: '',
+      reviewNotes: 'Sample review: portfolio review scheduled, no real rating available.',
       isSampleData: true,
       createdAt: now,
     },

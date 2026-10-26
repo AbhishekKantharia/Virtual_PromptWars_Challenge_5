@@ -39,7 +39,7 @@ export function Sidebar({ id, currentPage, onNavigate, isOpen, hasEvent }: Sideb
       </div>
 
       <div className="sidebar-nav">
-        <ul role="list" style={{ listStyle: 'none' }}>
+        <ul style={{ listStyle: 'none' }}>
           {NAV_ITEMS.map(({ page, label, icon, requiresEvent }) => {
             const disabled = requiresEvent && !hasEvent
             return (
@@ -62,7 +62,7 @@ export function Sidebar({ id, currentPage, onNavigate, isOpen, hasEvent }: Sideb
       </div>
 
       <div className="sidebar-footer">
-        <p>Demo mode — data stored locally</p>
+        <p>Demo mode  -  data stored locally</p>
         <p style={{ marginTop: '4px' }}>Not synced across devices</p>
       </div>
     </nav>
