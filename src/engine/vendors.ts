@@ -3,7 +3,7 @@
 // Pure functions for CRUD and vendor comparison.
 // ============================================================
 
-import { Vendor, VendorStatus } from '../types';
+import { Vendor, VendorStatus, ValidationResult, ValidationError } from '../types';
 import { nanoid } from '../utils/nanoid';
 
 export const VENDOR_CATEGORIES = [
@@ -27,12 +27,61 @@ export const VENDOR_CATEGORIES = [
 
 export type VendorCategory = (typeof VENDOR_CATEGORIES)[number];
 
-/** Create a new blank vendor record. */
+/** Validate a vendor form before it is stored or exported. */
+export function validateVendor(
+  vendor: Omit<Vendor, 'id' | 'createdAt' | 'isSampleData'>
+): ValidationResult {
+  const errors: ValidationError[] = [];
+  const name = vendor.name.trim();
+  if (name.length < 2) {
+    errors.push({ field: 'name', message: 'Vendor name must be at least 2 characters.' });
+  }
+  if (name.length > 120) {
+    errors.push({ field: 'name', message: 'Vendor name must be 120 characters or fewer.' });
+  }
+  if (!VENDOR_CATEGORIES.includes(vendor.category as (typeof VENDOR_CATEGORIES)[number])) {
+    errors.push({ field: 'category', message: 'Choose a valid vendor category.' });
+  }
+  if (!Number.isFinite(vendor.estimatedCost) || vendor.estimatedCost < 0) {
+    errors.push({ field: 'estimatedCost', message: 'Estimated cost must be zero or more.' });
+  }
+  if (
+    vendor.quotedCost !== undefined &&
+    (!Number.isFinite(vendor.quotedCost) || vendor.quotedCost < 0)
+  ) {
+    errors.push({ field: 'quotedCost', message: 'Quoted cost must be zero or more.' });
+  }
+  if (vendor.contactEmail && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(vendor.contactEmail)) {
+    errors.push({ field: 'contactEmail', message: 'Enter a valid email address or leave it blank.' });
+  }
+  if (vendor.contactEmail.length > 150) {
+    errors.push({ field: 'contactEmail', message: 'Email must be 150 characters or fewer.' });
+  }
+  if (vendor.contactPhone.length > 30) {
+    errors.push({ field: 'contactPhone', message: 'Phone must be 30 characters or fewer.' });
+  }
+  if (vendor.cancellationTerms.length > 300) {
+    errors.push({ field: 'cancellationTerms', message: 'Cancellation terms must be 300 characters or fewer.' });
+  }
+  if (vendor.accessibilityInfo.length > 300) {
+    errors.push({ field: 'accessibilityInfo', message: 'Accessibility info must be 300 characters or fewer.' });
+  }
+  if (vendor.notes.length > 500) {
+    errors.push({ field: 'notes', message: 'Notes must be 500 characters or fewer.' });
+  }
+  if ((vendor.reviewNotes ?? '').length > 500) {
+    errors.push({ field: 'reviewNotes', message: 'Review notes must be 500 characters or fewer.' });
+  }
+  return { valid: errors.length === 0, errors };
+}
+
+/** Create a new vendor record. */
 export function createVendor(
   partial: Omit<Vendor, 'id' | 'createdAt' | 'isSampleData'>
 ): Vendor {
   return {
     ...partial,
+    name: partial.name.trim(),
     id: nanoid(),
     isSampleData: false,
     createdAt: new Date().toISOString(),
